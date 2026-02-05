@@ -1,0 +1,15 @@
+# Stage 2: same pipeline, harder negatives + longer spacing
+base: configs/train/tum_stage1.yaml
+
+dataset:
+  frame_spacing: 2
+
+training:
+  epochs: 10
+  lr: 1.0e-4
+
+loss:
+  contrastive:
+    num_negatives: 512
+  repeatability:
+    weight: 0.7

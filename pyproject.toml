@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dino-slam3"
+version = "0.1.0"
+description = "Thesis-ready DINOv3+refinement local feature learning and VO/SLAM adapter for TUM RGB-D"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "torch>=2.1",
+  "torchvision",
+  "numpy",
+  "opencv-python",
+  "pillow",
+  "pyyaml",
+  "tqdm",
+  "rich",
+  "matplotlib",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

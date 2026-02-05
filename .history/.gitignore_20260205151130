@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+runs/
+wandb/
+.DS_Store
+*.png
+*.jpg
+*.txt
+tum_rgbd/

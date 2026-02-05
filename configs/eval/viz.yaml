@@ -1,0 +1,17 @@
+dataset:
+  root: tum_rgbd
+  sequences:
+    - rgbd_dataset_freiburg1_xyz
+  input_size: 448
+  frame_spacing: 1
+
+camera:
+  fx: 525.0
+  fy: 525.0
+  cx: 319.5
+  cy: 239.5
+
+model:
+  checkpoint: runs/tum_stage1_hybrid/checkpoints/epoch_20.pt
+  patch_size: 16
+  descriptor_dim: 128
