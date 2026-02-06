@@ -15,3 +15,4 @@ wandb/
 *.jpg
 *.txt
 tum_rgbd/
+.history

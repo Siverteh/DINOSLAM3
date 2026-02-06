@@ -1,5 +1,5 @@
 run:
-  name: tum_stage1_hybrid
+  name: tum_stage1_working_v2
   out_dir: runs
 
 device: auto
@@ -15,9 +15,10 @@ dataset:
     - rgbd_dataset_freiburg3_sitting_xyz
   val_sequences:
     - rgbd_dataset_freiburg1_desk
-  input_size: 448
   frame_spacing: 1
   max_frames: null
+  max_association_dt: 0.02
+  pad_to: 16
   augmentation:
     enabled: true
     brightness: 0.2
@@ -27,25 +28,27 @@ dataset:
     gaussian_blur: 0.2
 
 camera:
-  # Intrinsics at ORIGINAL TUM resolution (usually 640x480). They will be scaled to input_size.
+  # If you know the exact intrinsics of your Freiburg subset, put them here.
+  # The benchmark provides calibration info; do NOT guess for final eval.
   fx: 525.0
   fy: 525.0
   cx: 319.5
   cy: 239.5
 
 model:
-  backbone: dinov3
   patch_size: 16
   descriptor_dim: 128
+  freeze_backbone: true
+  stride: 4
   fine_cnn:
-    enabled: true
     channels: 64
     num_blocks: 6
-    out_stride: 4   # fine features at H/4 × W/4
   heads:
     detector:
       nms_radius: 4
       max_keypoints: 1024
+      tile_size: 16
+      k_per_tile: 8
     offset:
       enabled: true
     reliability:
@@ -53,62 +56,40 @@ model:
 
 training:
   epochs: 20
-  batch_size: 16              # H100: bump batch to give GPU more work (drop to 4 if you want)
+  batch_size: 16
   lr: 2.0e-4
+  lr_min: 1.0e-6
   weight_decay: 1.0e-4
-
-  # ---- FEED THE H100 ----
-  num_workers: 32            # was 4; 16 is a good start on 256GB RAM
-  pin_memory: true
-  persistent_workers: true
-  prefetch_factor: 4
-
-  log_every: 50              # was 25; reduce prints/sync overhead
-  save_every: 1              # harmless; best_model.pt handled by trainer code
-
-  # ---- AMP (H100 likes BF16) ----
-  mixed_precision: true      # was false
-  amp_dtype: bf16            # new (trainer uses this)
-
-  # ---- CHECKPOINTS ----
-  save_last: true            # optional: writes last.pt; best always writes best_model.pt
+  num_workers: 16
+  log_every: 25
+  mixed_precision: true
+  amp_dtype: bf16
+  diag_batches: 3
+  diag_margin: 0.08
 
 loss:
   geom:
-    weight: 1.0
-    min_depth: 0.3
-    max_depth: 6.0
     sample_points: 2048
-
-    # NEW: stop border/top collapse during supervision sampling
-    border_margin: 16
-
-    # NEW: used by new compute_losses() depth-consistency mask
-    depth_tolerance: 0.05
-
-    # (old reproj_px_thresh is not used by the new loss; keep if you want, but it's ignored)
-    # reproj_px_thresh: 3.0
+    border: 8
+    depth_consistency_m: 0.05
 
   contrastive:
-    weight: 2.0
+    weight: 1.0
     temperature: 0.07
-    num_negatives: 32         # was 256; 256 is slow and not needed
+    max_positives: 512
 
-  repeatability:
-    weight: 0.5
+  detector:
+    weight: 1.0
+    alpha: 0.25
+    gamma: 2.0
+    target_mean: 0.01
+    sparsity_weight: 0.2
 
   offset:
     weight: 0.2
 
-  regularizers:
-    # New reg is positive + non-constant; keep weight small so it doesn't dominate
-    weight: 0.05              # was 0.2
-
-    # NEW: replaces uniformity_weight in new loss
-    entropy_weight: 1.0
-    coverage_weight: 1.0
-    coverage_bins: 8
-
-    # (old keys are not used by the new regularizers; keep if you want, but ignored)
-    # uniformity_weight: 1.0
-    # entropy_weight: 0.5
+  reliability:
+    weight: 0.05
+    target_mean: 0.1
+    max_points: 512
+    margin_thr: 0.05

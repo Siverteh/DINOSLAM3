@@ -1,9 +1,10 @@
 dataset:
   root: src/dino_slam3/data/tum_rgbd
   sequences:
-    - rgbd_dataset_freiburg1_xyz
-  input_size: 448
+    - rgbd_dataset_freiburg1_desk
   frame_spacing: 1
+  max_association_dt: 0.02
+  pad_to: 16
 
 camera:
   fx: 525.0
@@ -12,7 +13,7 @@ camera:
   cy: 239.5
 
 model:
-  checkpoint: runs/tum_stage1_working_v2/checkpoints/epoch_003.pt  # or best.pt if it's valid
+  checkpoint: runs/tum_stage1_working_v2/checkpoints/best.pt
   patch_size: 16
   descriptor_dim: 128
   stride: 4
