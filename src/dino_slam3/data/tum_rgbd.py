@@ -1,125 +1,15 @@
 from __future__ import annotations
 
-import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import random
 
 import numpy as np
 import torch
-from PIL import Image
 from torch.utils.data import Dataset
-import torchvision.transforms as T
-
-
-def _resolve_root(dataset_root: str | Path) -> Path:
-    p = Path(dataset_root)
-    if p.is_absolute():
-        return p
-    return (Path.cwd() / p).resolve()
-
-
-def _read_tum_list(txt_path: Path) -> List[Tuple[float, str]]:
-    """
-    Reads TUM rgb.txt / depth.txt style files:
-      timestamp path
-    Ignores comment lines starting with '#'.
-    Returns sorted list by timestamp.
-    """
-    if not txt_path.exists():
-        raise FileNotFoundError(f"Missing file: {txt_path}")
-    items: List[Tuple[float, str]] = []
-    for line in txt_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        ts = float(parts[0])
-        rel = parts[1]
-        items.append((ts, rel))
-    items.sort(key=lambda x: x[0])
-    return items
-
-
-def _associate_by_timestamp(
-    rgb_items: List[Tuple[float, str]],
-    depth_items: List[Tuple[float, str]],
-    max_dt: float = 0.02,
-) -> List[Tuple[float, str, float, str]]:
-    """
-    Associates rgb and depth streams by nearest timestamp within max_dt.
-
-    Returns list of (t_rgb, rgb_relpath, t_depth, depth_relpath).
-    """
-    if not rgb_items or not depth_items:
-        return []
-
-    depth_ts = np.array([t for t, _ in depth_items], dtype=np.float64)
-    out: List[Tuple[float, str, float, str]] = []
-    for t_rgb, rgb_rel in rgb_items:
-        j = int(np.argmin(np.abs(depth_ts - t_rgb)))
-        t_d, d_rel = depth_items[j]
-        if abs(t_d - t_rgb) <= max_dt:
-            out.append((t_rgb, rgb_rel, t_d, d_rel))
-    return out
-
-
-def _quat_to_rot(q: np.ndarray) -> np.ndarray:
-    # q = [qx, qy, qz, qw]
-    x, y, z, w = q
-    xx, yy, zz = x * x, y * y, z * z
-    xy, xz, yz = x * y, x * z, y * z
-    wx, wy, wz = w * x, w * y, w * z
-    R = np.array(
-        [
-            [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
-            [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
-            [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)],
-        ],
-        dtype=np.float32,
-    )
-    return R
-
-
-def _pose_mat(tx, ty, tz, qx, qy, qz, qw) -> np.ndarray:
-    R = _quat_to_rot(np.array([qx, qy, qz, qw], dtype=np.float32))
-    Tm = np.eye(4, dtype=np.float32)
-    Tm[:3, :3] = R
-    Tm[:3, 3] = np.array([tx, ty, tz], dtype=np.float32)
-    return Tm
-
-
-def _read_groundtruth(gt_path: Path) -> List[Tuple[float, np.ndarray]]:
-    """
-    groundtruth.txt:
-      timestamp tx ty tz qx qy qz qw
-    """
-    if not gt_path.exists():
-        return []
-    out: List[Tuple[float, np.ndarray]] = []
-    for line in gt_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        if len(parts) != 8:
-            continue
-        ts = float(parts[0])
-        tx, ty, tz, qx, qy, qz, qw = map(float, parts[1:])
-        out.append((ts, _pose_mat(tx, ty, tz, qx, qy, qz, qw)))
-    out.sort(key=lambda x: x[0])
-    return out
-
-
-def _pose_nearest(gt: List[Tuple[float, np.ndarray]], ts: float) -> Optional[np.ndarray]:
-    if not gt:
-        return None
-    ts_arr = np.array([t for t, _ in gt], dtype=np.float64)
-    j = int(np.argmin(np.abs(ts_arr - ts)))
-    return gt[j][1].astype(np.float32)
-
+import cv2
 
 @dataclass
 class CameraIntrinsics:
@@ -130,182 +20,300 @@ class CameraIntrinsics:
 
     def K(self) -> torch.Tensor:
         return torch.tensor(
-            [
-                [self.fx, 0.0, self.cx],
-                [0.0, self.fy, self.cy],
-                [0.0, 0.0, 1.0],
-            ],
+            [[self.fx, 0.0, self.cx],
+             [0.0, self.fy, self.cy],
+             [0.0, 0.0, 1.0]],
             dtype=torch.float32,
         )
 
+def tum_intrinsics_for_sequence(sequence: str) -> CameraIntrinsics:
+    # Official intrinsics listed by the TUM benchmark documentation.
+    # Freiburg 1 RGB: fx=517.3 fy=516.5 cx=318.6 cy=255.3
+    # Freiburg 2 RGB: fx=520.9 fy=521.0 cx=325.1 cy=249.7
+    # Freiburg 3 RGB: fx=535.4 fy=539.2 cx=320.1 cy=247.6
+    s = sequence.lower()
+    if "freiburg1" in s:
+        return CameraIntrinsics(517.3, 516.5, 318.6, 255.3)
+    if "freiburg2" in s:
+        return CameraIntrinsics(520.9, 521.0, 325.1, 249.7)
+    if "freiburg3" in s:
+        return CameraIntrinsics(535.4, 539.2, 320.1, 247.6)
+    # Fallback (ROS default)
+    return CameraIntrinsics(525.0, 525.0, 319.5, 239.5)
 
-@dataclass
-class PreprocessInfo:
-    H: int
-    W: int
-    pad_bottom: int
-    pad_right: int
+def _read_assoc_file(path: Path) -> List[Tuple[float, str]]:
+    items: List[Tuple[float, str]] = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        ts, rel = line.split()[:2]
+        items.append((float(ts), rel))
+    return items
 
+def _read_groundtruth(path: Path) -> List[Tuple[float, np.ndarray]]:
+    """
+    Each line: timestamp tx ty tz qx qy qz qw
+    Returns T_w_c (4x4)
+    """
+    out: List[Tuple[float, np.ndarray]] = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        t = float(parts[0])
+        tx, ty, tz = map(float, parts[1:4])
+        qx, qy, qz, qw = map(float, parts[4:8])
+
+        # quaternion to rotation (x,y,z,w)
+        x, y, z, w = qx, qy, qz, qw
+        R = np.array([
+            [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+            [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+            [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+        ], dtype=np.float32)
+
+        T = np.eye(4, dtype=np.float32)
+        T[:3, :3] = R
+        T[:3, 3] = np.array([tx, ty, tz], dtype=np.float32)
+        out.append((t, T))
+    return out
+
+def _associate_nearest(
+    a: List[Tuple[float, Any]],
+    b: List[Tuple[float, Any]],
+    max_dt: float
+) -> List[Tuple[float, Any, float, Any]]:
+    """
+    For each a_i, pick nearest b_j within max_dt.
+    Returns list of (ta, a_data, tb, b_data)
+    """
+    bt = np.array([t for t, _ in b], dtype=np.float64)
+    out = []
+    for ta, da in a:
+        j = int(np.argmin(np.abs(bt - ta)))
+        tb, db = b[j]
+        if abs(tb - ta) <= max_dt:
+            out.append((ta, da, tb, db))
+    return out
+
+def _extract_time_from_rgb_depth_item(item):
+    # Handles:
+    # 1) (t_rgb, rgb_path, depth_path) or (t_rgb, rgb_path, t_depth, depth_path)
+    # 2) ((t_rgb, rgb_path), (t_depth, depth_path))
+    # 3) (t_rgb, something)
+    if isinstance(item, (list, tuple)):
+        # nested pair format: ((t_rgb, rgb), (t_depth, depth))
+        if len(item) == 2 and isinstance(item[0], (list, tuple)) and len(item[0]) >= 1:
+            return float(item[0][0])
+        # flat format: (t_rgb, ...)
+        if len(item) >= 1:
+            return float(item[0])
+    # fallback
+    return float(item)
 
 class TUMRGBDDataset(Dataset):
-    """
-    Returns paired frames with:
-      rgb1, rgb2: float32 (3,H,W) ImageNet normalized
-      depth1, depth2: float32 (1,H,W) in meters
-      valid_depth1, valid_depth2: float32 (1,H,W) {0,1}
-      K: float32 (3,3) intrinsics of returned tensors
-      relative_pose: float32 (4,4) mapping cam1 -> cam2
-    """
-
     def __init__(
         self,
         dataset_root: str | Path,
         sequence: str,
-        intrinsics: CameraIntrinsics,
-        frame_spacing: int = 1,
-        max_frames: Optional[int] = None,
-        is_train: bool = True,
-        depth_scale: float = 5000.0,
-        max_association_dt: float = 0.02,
+        frame_spacing_min: int = 1,
+        frame_spacing_max: int = 4,
+        max_frames: int | None = None,
         pad_to: int = 16,
-        augmentation: Optional[dict] = None,
+        is_train: bool = True,
+        augmentation: dict | None = None,
+        max_rgb_depth_dt: float = 0.02,
+        max_rgb_gt_dt: float = 0.02,
+        depth_scale: float = 5000.0,
     ):
-        self.dataset_root = _resolve_root(dataset_root)
+        self.dataset_root = Path(dataset_root).expanduser()
+        try:
+            self.dataset_root = self.dataset_root.resolve()
+        except Exception:
+            pass
+
         self.sequence = sequence
-        self.frame_spacing = int(frame_spacing)
-        self.max_frames = None if max_frames is None else int(max_frames)
         self.is_train = bool(is_train)
-        self.depth_scale = float(depth_scale)
-        self.max_association_dt = float(max_association_dt)
+
+        self.frame_spacing_min = int(frame_spacing_min)
+        self.frame_spacing_max = int(frame_spacing_max)
+        assert self.frame_spacing_min >= 1
+        assert self.frame_spacing_max >= self.frame_spacing_min
+
+        self.max_frames = None if max_frames is None else int(max_frames)
         self.pad_to = int(pad_to)
+        self.depth_scale = float(depth_scale)
 
-        seq_dir = self.dataset_root / sequence
-        if not seq_dir.exists():
-            seq_dir = self.dataset_root
-        self.sequence_dir = seq_dir
+        self.max_rgb_depth_dt = float(max_rgb_depth_dt)
+        self.max_rgb_gt_dt = float(max_rgb_gt_dt)
 
-        rgb_txt = seq_dir / "rgb.txt"
-        depth_txt = seq_dir / "depth.txt"
-        gt_txt = seq_dir / "groundtruth.txt"
+        # Aug config (your _photometric_aug expects self.aug)
+        self.aug = augmentation if (augmentation and self.is_train) else None
 
-        rgb_items = _read_tum_list(rgb_txt)
-        depth_items = _read_tum_list(depth_txt)
-        pairs = _associate_by_timestamp(rgb_items, depth_items, max_dt=self.max_association_dt)
+        # Sequence directory
+        self.sequence_dir = self.dataset_root / sequence
+        if not self.sequence_dir.exists():
+            raise FileNotFoundError(f"Sequence folder not found: {self.sequence_dir}")
+
+        rgb_txt = self.sequence_dir / "rgb.txt"
+        depth_txt = self.sequence_dir / "depth.txt"
+        gt_txt = self.sequence_dir / "groundtruth.txt"
+
+        if not rgb_txt.exists():
+            raise FileNotFoundError(f"Missing {rgb_txt}")
+        if not depth_txt.exists():
+            raise FileNotFoundError(f"Missing {depth_txt}")
+        if not gt_txt.exists():
+            raise FileNotFoundError(f"Missing {gt_txt}")
+
+        # Read lists
+        rgb_list = _read_assoc_file(rgb_txt)          # [(t, "rgb/..png"), ...]
+        depth_list = _read_assoc_file(depth_txt)      # [(t, "depth/..png"), ...]
+        gt_list = _read_groundtruth(gt_txt)           # [(t, 4x4), ...]
+
+        if len(rgb_list) == 0 or len(depth_list) == 0:
+            raise RuntimeError(f"Empty rgb/depth list in {self.sequence_dir}")
+        if len(gt_list) == 0:
+            raise RuntimeError(f"Empty groundtruth list in {self.sequence_dir}")
+
+        # Associate RGB->Depth : returns list of (t_rgb, rgb_rel, t_d, depth_rel)
+        rgb_depth = _associate_nearest(rgb_list, depth_list, max_dt=self.max_rgb_depth_dt)
 
         if self.max_frames is not None:
-            pairs = pairs[: self.max_frames]
+            rgb_depth = rgb_depth[: self.max_frames]
 
-        if len(pairs) < (1 + self.frame_spacing):
-            raise RuntimeError(f"Not enough associated frames in {seq_dir} with spacing={self.frame_spacing}")
-
-        self.pairs = pairs
-        self.gt = _read_groundtruth(gt_txt)
-        self.intr = intrinsics
-
-        self.augmentation = augmentation if (augmentation and self.is_train and augmentation.get("enabled", False)) else None
-        if self.augmentation:
-            self.color_jitter = T.ColorJitter(
-                brightness=float(self.augmentation.get("brightness", 0.2)),
-                contrast=float(self.augmentation.get("contrast", 0.2)),
-                saturation=float(self.augmentation.get("saturation", 0.2)),
-                hue=float(self.augmentation.get("hue", 0.05)),
+        if len(rgb_depth) < (1 + self.frame_spacing_min):
+            raise RuntimeError(
+                f"Not enough rgb-depth associations in {self.sequence_dir}. "
+                f"Got {len(rgb_depth)}, need >= {1 + self.frame_spacing_min}."
             )
-            self.blur_prob = float(self.augmentation.get("gaussian_blur", 0.2))
-            self.blur = T.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
 
-        self.to_tensor = T.ToTensor()
-        self.norm = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        # Prepare GT lookup (timestamps only in numpy)
+        gt_ts = np.array([float(t) for (t, _) in gt_list], dtype=np.float64)
+        gt_Ts = [T for (_, T) in gt_list]
+
+        def nearest_gt_pose(t_rgb: float) -> Optional[np.ndarray]:
+            j = int(np.argmin(np.abs(gt_ts - t_rgb)))
+            if abs(float(gt_ts[j]) - float(t_rgb)) <= self.max_rgb_gt_dt:
+                return gt_Ts[j].astype(np.float32)
+            return None
+
+        # Build frames: absolute paths + pose
+        frames = []
+        for t_rgb, rgb_rel, t_d, depth_rel in rgb_depth:
+            T_w_c = nearest_gt_pose(float(t_rgb))
+            if T_w_c is None:
+                continue  # drop if no GT close enough (prevents None later)
+
+            rgb_abs = (self.sequence_dir / rgb_rel).as_posix()
+            depth_abs = (self.sequence_dir / depth_rel).as_posix()
+
+            frames.append(
+                {
+                    "t_rgb": float(t_rgb),
+                    "t_depth": float(t_d),
+                    "rgb": rgb_abs,
+                    "depth": depth_abs,
+                    "T_w_c": T_w_c,
+                }
+            )
+
+        if len(frames) < (1 + self.frame_spacing_min):
+            raise RuntimeError(
+                f"After GT association, not enough usable frames in {self.sequence_dir}. "
+                f"Got {len(frames)}."
+            )
+
+        self.frames = frames
+        self.intr = tum_intrinsics_for_sequence(sequence)
 
     def __len__(self) -> int:
-        return max(0, len(self.pairs) - self.frame_spacing)
+        # Important: for train, delta can be up to frame_spacing_max
+        max_delta = self.frame_spacing_max if self.is_train else self.frame_spacing_min
+        return max(0, len(self.frames) - max_delta)
 
-    def _pad_to_multiple(self, x: torch.Tensor, pad_value: float = 0.0) -> Tuple[torch.Tensor, PreprocessInfo]:
-        C, H, W = x.shape
-        pad_bottom = (self.pad_to - (H % self.pad_to)) % self.pad_to
-        pad_right = (self.pad_to - (W % self.pad_to)) % self.pad_to
-        if pad_bottom == 0 and pad_right == 0:
-            return x, PreprocessInfo(H=H, W=W, pad_bottom=0, pad_right=0)
-        x_pad = torch.nn.functional.pad(
-            x,
-            pad=(0, pad_right, 0, pad_bottom),  # left,right,top,bottom
-            mode="constant",
-            value=float(pad_value),
-        )
-        return x_pad, PreprocessInfo(H=H, W=W, pad_bottom=pad_bottom, pad_right=pad_right)
+    def _read_rgb(self, path: str) -> torch.Tensor:
+        bgr = cv2.imread(path, cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise FileNotFoundError(path)
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        x = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
+        return x
 
-    def _load_rgb(self, rel: str) -> Image.Image:
-        p = self.sequence_dir / rel
-        return Image.open(p).convert("RGB")
+    def _read_depth(self, path: str) -> torch.Tensor:
+        d = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if d is None:
+            raise FileNotFoundError(path)
+        if d.dtype != np.uint16:
+            d = d.astype(np.uint16)
+        z = torch.from_numpy(d).float() / self.depth_scale
+        return z.unsqueeze(0)
 
-    def _load_depth_png(self, rel: str) -> np.ndarray:
-        p = self.sequence_dir / rel
-        d = np.array(Image.open(p), dtype=np.float32)
-        d = d / self.depth_scale  # meters
-        return d
+    def _pad(self, x: torch.Tensor) -> torch.Tensor:
+        _, H, W = x.shape
+        pad_b = (self.pad_to - (H % self.pad_to)) % self.pad_to
+        pad_r = (self.pad_to - (W % self.pad_to)) % self.pad_to
+        if pad_b == 0 and pad_r == 0:
+            return x
+        return torch.nn.functional.pad(x, (0, pad_r, 0, pad_b), value=0.0)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        i1 = idx
-        i2 = idx + self.frame_spacing
+    def _photometric_aug(self, x: torch.Tensor) -> torch.Tensor:
+        cfg = (self.aug or {}).get("photometric", {})
+        if (not self.is_train) or (not cfg.get("enabled", False)):
+            return x
 
-        t1, rgb_rel1, _, depth_rel1 = self.pairs[i1]
-        t2, rgb_rel2, _, depth_rel2 = self.pairs[i2]
+        b = float(cfg.get("brightness", 0.0))
+        c = float(cfg.get("contrast", 0.0))
 
-        rgb1 = self._load_rgb(rgb_rel1)
-        rgb2 = self._load_rgb(rgb_rel2)
+        # brightness
+        if b > 0:
+            delta = (torch.rand(1).item() * 2 - 1) * b
+            x = torch.clamp(x + delta, 0.0, 1.0)
 
-        d1 = self._load_depth_png(depth_rel1)
-        d2 = self._load_depth_png(depth_rel2)
+        # contrast
+        if c > 0:
+            scale = 1.0 + (torch.rand(1).item() * 2 - 1) * c
+            mean = x.mean(dim=(1, 2), keepdim=True)
+            x = torch.clamp((x - mean) * scale + mean, 0.0, 1.0)
 
-        if self.augmentation:
-            rgb1 = self.color_jitter(rgb1)
-            rgb2 = self.color_jitter(rgb2)
-            rng = np.random.RandomState(np.random.randint(0, 2**31 - 1))
-            if rng.rand() < self.blur_prob:
-                rgb1 = self.blur(rgb1)
-            if rng.rand() < self.blur_prob:
-                rgb2 = self.blur(rgb2)
+        return x
 
-        rgb1_t = self.norm(self.to_tensor(rgb1))  # (3,H,W)
-        rgb2_t = self.norm(self.to_tensor(rgb2))
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        if self.is_train:
+            delta = random.randint(self.frame_spacing_min, self.frame_spacing_max)
+        else:
+            delta = self.frame_spacing_min
 
-        depth1_t = torch.from_numpy(d1).unsqueeze(0)  # (1,H,W)
-        depth2_t = torch.from_numpy(d2).unsqueeze(0)
+        f1 = self.frames[idx]
+        f2 = self.frames[idx + delta]
 
-        rgb1_t, info = self._pad_to_multiple(rgb1_t, pad_value=0.0)
-        rgb2_t, _ = self._pad_to_multiple(rgb2_t, pad_value=0.0)
-        depth1_t, _ = self._pad_to_multiple(depth1_t, pad_value=0.0)
-        depth2_t, _ = self._pad_to_multiple(depth2_t, pad_value=0.0)
+        rgb1 = self._pad(self._photometric_aug(self._read_rgb(f1["rgb"])))
+        rgb2 = self._pad(self._photometric_aug(self._read_rgb(f2["rgb"])))
 
-        valid1 = (depth1_t > 0.0).float()
-        valid2 = (depth2_t > 0.0).float()
+        depth1 = self._pad(self._read_depth(f1["depth"]))
+        depth2 = self._pad(self._read_depth(f2["depth"]))
 
-        # NOTE: We are NOT resizing anywhere here.
-        # We only pad bottom/right to multiples of 16. That does NOT change cx/cy.
+        valid1 = (depth1 > 0.0).float()
+        valid2 = (depth2 > 0.0).float()
+
+        T1 = torch.from_numpy(f1["T_w_c"]).float()
+        T2 = torch.from_numpy(f2["T_w_c"]).float()
+
+        # Relative pose cam1->cam2: inv(T_w_c2) @ T_w_c1
+        T21 = torch.linalg.inv(T2) @ T1
+
         K = self.intr.K()
 
-        # Poses: TUM groundtruth is commonly T_w_c (camera in world).
-        # We need relative pose mapping cam1 -> cam2:
-        #   p_w  = T_w_c1 * p_c1
-        #   p_c2 = inv(T_w_c2) * p_w = inv(T2) * T1 * p_c1
-        T1 = _pose_nearest(self.gt, t1)
-        T2 = _pose_nearest(self.gt, t2)
-        if T1 is None or T2 is None:
-            relative = np.eye(4, dtype=np.float32)
-        else:
-            relative = np.linalg.inv(T2) @ T1  # <-- FIXED DIRECTION
-
-        out: Dict[str, torch.Tensor] = {
-            "rgb1": rgb1_t,
-            "rgb2": rgb2_t,
-            "depth1": depth1_t,
-            "depth2": depth2_t,
+        return {
+            "rgb1": rgb1,
+            "rgb2": rgb2,
+            "depth1": depth1,
+            "depth2": depth2,
             "valid_depth1": valid1,
             "valid_depth2": valid2,
             "K": K,
-            "relative_pose": torch.from_numpy(relative),
-            "timestamp1": torch.tensor(float(t1), dtype=torch.float32),
-            "timestamp2": torch.tensor(float(t2), dtype=torch.float32),
-            "orig_hw": torch.tensor([info.H, info.W], dtype=torch.int32),
-            "pad_br": torch.tensor([info.pad_bottom, info.pad_right], dtype=torch.int32),
+            "relative_pose": T21,
+            "sequence": self.sequence,
         }
-        return out

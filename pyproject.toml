@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dino-slam3"
-version = "0.1.0"
-description = "Thesis-ready DINOv3+refinement local feature learning and VO/SLAM adapter for TUM RGB-D"
+version = "0.2.0"
+description = "DINOv3 + fine refinement local feature learning for TUM RGB-D and SLAM integration"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-  "torch>=2.1",
+  "torch>=2.2",
   "torchvision",
   "numpy",
   "opencv-python",
@@ -18,6 +18,12 @@ dependencies = [
   "tqdm",
   "rich",
   "matplotlib",
+
+  # DINOv3 via Hugging Face Transformers (v4.56+ supports DINOv3 backbones)
+  "transformers>=4.56.0",
+
+  # Differentiable geometry utilities (PnP DLT)
+  "kornia>=0.7.0",
 ]
 
 [tool.setuptools]

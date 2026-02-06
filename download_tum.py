@@ -17,32 +17,49 @@ BASE_URL = "https://vision.in.tum.de/rgbd/dataset/{}/rgbd_dataset_{}_{}.tgz"
 SEQUENCES = {
     # Freiburg 1 sequences (Kinect v1)
     'freiburg1': [
+        'xyz',
+        'rpy',
+        'floor',
         'desk',
         'desk2',
-        'floor',
-        'plant',
         'room',
-        'rpy',
-        'teddy',
-        'xyz',
-        '360'
+        '360',
+        'plant',
+        'teddy'
     ],
     # Freiburg 2 sequences (Kinect v1, different location)
     'freiburg2': [
-        'desk',
         'xyz',
         'rpy',
+        '360_hemisphere',
+        '360_kidnap',
+        'desk',
+        'pioneer_360',
+        'pioneer_slam',
+        'pioneer_slam2',
+        'pioneer_slam3',
+        'dishes',
+        'flowerbouquet',
+        'flowerbouquet_brownbackground',
+        'metallic_sphere',
+        'metallic_sphere2',
+        'coke',
         'desk_with_person'
     ],
     # Freiburg 3 sequences (Kinect v2)
     'freiburg3': [
         'long_office_household',
-        'walking_static',
+        'structure_texture_near',
+        'structure_texture_far',
         'walking_xyz',
-        'walking_rpy',
         'sitting_xyz',
-        'sitting_static',
-        'cabinet'
+        'walking_halfsphere',
+        'sitting_halfsphere',
+        'walking_rpy',
+        'sitting_rpy',
+        'teddy',
+        'cabinet',
+        'large_cabinet'
     ]
 }
 
@@ -53,8 +70,8 @@ def download_sequence(freiburg_id: str, sequence_name: str, output_dir: Path) ->
     url = BASE_URL.format(freiburg_id, freiburg_id, sequence_name)
 
     # Output paths
-    tgz_file = output_dir / f"rgbd_dataset_freiburg{freiburg_id}_{sequence_name}.tgz"
-    extract_dir = output_dir / f"rgbd_dataset_freiburg{freiburg_id}_{sequence_name}"
+    tgz_file = output_dir / f"rgbd_dataset_{freiburg_id}_{sequence_name}.tgz"
+    extract_dir = output_dir / f"rgbd_dataset_{freiburg_id}_{sequence_name}"
 
     # Check if already exists
     if extract_dir.exists():
@@ -91,9 +108,7 @@ def download_sequence(freiburg_id: str, sequence_name: str, output_dir: Path) ->
 
 def main():
     # Get output directory
-
     output_dir = Path(__file__).parent.parent / "tum_rgbd"
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("="*70)
@@ -118,7 +133,7 @@ def main():
 
     for freiburg_id, sequences in SEQUENCES.items():
         print(f"\n{'='*70}")
-        print(f"Downloading Freiburg{freiburg_id} sequences ({len(sequences)} total)")
+        print(f"Downloading {freiburg_id} sequences ({len(sequences)} total)")
         print(f"{'='*70}")
 
         for seq_name in sequences:

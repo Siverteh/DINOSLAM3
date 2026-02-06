@@ -1,95 +1,59 @@
-run:
-  name: tum_stage1_working_v2
-  out_dir: runs
+base: base.yaml
 
-device: auto
-seed: 42
+run:
+  name: tum_stage1_dinov3_refine_v1
 
 dataset:
-  type: tum_rgbd
-  root: src/dino_slam3/data/tum_rgbd
+  # Use many sequences; avoid *_validation (no GT).
+  # This list comes from the official download page categories.
+  # You can move hard sequences (nostructure/dynamic) into val/test if desired.
   train_sequences:
     - rgbd_dataset_freiburg1_xyz
-    - rgbd_dataset_freiburg1_room
-    - rgbd_dataset_freiburg2_xyz
-    - rgbd_dataset_freiburg3_sitting_xyz
-  val_sequences:
+    - rgbd_dataset_freiburg1_rpy
+    - rgbd_dataset_freiburg1_floor
     - rgbd_dataset_freiburg1_desk
-  frame_spacing: 1
-  max_frames: null
-  max_association_dt: 0.02
-  pad_to: 16
-  augmentation:
-    enabled: true
-    brightness: 0.2
-    contrast: 0.2
-    saturation: 0.2
-    hue: 0.05
-    gaussian_blur: 0.2
+    - rgbd_dataset_freiburg1_desk2
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg1_360
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_teddy
 
-camera:
-  # If you know the exact intrinsics of your Freiburg subset, put them here.
-  # The benchmark provides calibration info; do NOT guess for final eval.
-  fx: 525.0
-  fy: 525.0
-  cx: 319.5
-  cy: 239.5
+    - rgbd_dataset_freiburg2_xyz
+    - rgbd_dataset_freiburg2_rpy
+    - rgbd_dataset_freiburg2_360_hemisphere
+    - rgbd_dataset_freiburg2_360_kidnap
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg2_pioneer_360
+    - rgbd_dataset_freiburg2_pioneer_slam
+    - rgbd_dataset_freiburg2_pioneer_slam2
+    - rgbd_dataset_freiburg2_pioneer_slam3
+    - rgbd_dataset_freiburg2_dishes
+    - rgbd_dataset_freiburg2_flowerbouquet
+    - rgbd_dataset_freiburg2_flowerbouquet_brownbackground
+    - rgbd_dataset_freiburg2_metallic_sphere
+    - rgbd_dataset_freiburg2_metallic_sphere2
+    - rgbd_dataset_freiburg2_coke
+    - rgbd_dataset_freiburg2_desk_with_person
 
-model:
-  patch_size: 16
-  descriptor_dim: 128
-  freeze_backbone: true
-  stride: 4
-  fine_cnn:
-    channels: 64
-    num_blocks: 6
-  heads:
-    detector:
-      nms_radius: 4
-      max_keypoints: 1024
-      tile_size: 16
-      k_per_tile: 8
-    offset:
-      enabled: true
-    reliability:
-      enabled: true
+    - rgbd_dataset_freiburg3_long_office_household
+    - rgbd_dataset_freiburg3_structure_texture_near
+    - rgbd_dataset_freiburg3_structure_texture_far
+    - rgbd_dataset_freiburg3_walking_xyz
+    - rgbd_dataset_freiburg3_sitting_xyz
+    - rgbd_dataset_freiburg3_walking_halfsphere
+    - rgbd_dataset_freiburg3_sitting_halfsphere
+    - rgbd_dataset_freiburg3_walking_rpy
+    - rgbd_dataset_freiburg3_sitting_rpy
+    - rgbd_dataset_freiburg3_teddy
+    - rgbd_dataset_freiburg3_cabinet
+    - rgbd_dataset_freiburg3_large_cabinet
+
+  val_sequences:
+    - rgbd_dataset_freiburg1_xyz
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg3_walking_xyz
 
 training:
   epochs: 20
   batch_size: 16
-  lr: 2.0e-4
-  lr_min: 1.0e-6
-  weight_decay: 1.0e-4
   num_workers: 16
-  log_every: 25
-  mixed_precision: true
-  amp_dtype: bf16
-  diag_batches: 3
-  diag_margin: 0.08
-
-loss:
-  geom:
-    sample_points: 2048
-    border: 8
-    depth_consistency_m: 0.05
-
-  contrastive:
-    weight: 1.0
-    temperature: 0.07
-    max_positives: 512
-
-  detector:
-    weight: 1.0
-    alpha: 0.25
-    gamma: 2.0
-    target_mean: 0.01
-    sparsity_weight: 0.2
-
-  offset:
-    weight: 0.2
-
-  reliability:
-    weight: 0.05
-    target_mean: 0.1
-    max_points: 512
-    margin_thr: 0.05
