@@ -62,26 +62,32 @@ class DinoV3Backbone(nn.Module):
 
     @torch.no_grad()
     def _forward_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Return token embeddings [B, N, C] from timm ViT/EVA.
+
+        HARD FIX:
+          - Always run backbone in FP32
+          - Always disable autocast inside backbone to avoid BF16 GEMMEx issues on some stacks
+        """
         if self.model is None:
             raise RuntimeError("DinoV3Backbone.model is None. Did you call load()?")
 
         if not hasattr(self.model, "forward_features"):
             raise RuntimeError("timm model has no forward_features(); cannot extract tokens reliably.")
 
-        # Make sure patch_embed conv params match the dtype that autocast uses for x
-        # (this prevents Half-vs-float bias mismatches)
-        pe = getattr(self.model, "patch_embed", None)
-        if pe is not None and hasattr(pe, "proj"):
-            proj = pe.proj
-            # match input dtype (x is often fp16 under autocast)
-            target_dtype = x.dtype
-            if proj.weight.dtype != target_dtype:
-                proj.weight.data = proj.weight.data.to(target_dtype)
-            if proj.bias is not None and proj.bias.dtype != target_dtype:
-                proj.bias.data = proj.bias.data.to(target_dtype)
+        # Ensure model is on correct device and in fp32
+        if next(self.model.parameters()).device != x.device:
+            self.model.to(device=x.device)
+        if next(self.model.parameters()).dtype != torch.float32:
+            self.model.to(dtype=torch.float32)
 
-        tokens = self.model.forward_features(x)
+        # Disable autocast inside backbone and cast input to fp32
+        device_type = "cuda" if x.is_cuda else "cpu"
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            x_fp32 = x.float()
+            tokens = self.model.forward_features(x_fp32)
 
+        # timm may return dict
         if isinstance(tokens, dict):
             if "x" in tokens:
                 tokens = tokens["x"]
@@ -95,49 +101,21 @@ class DinoV3Backbone(nn.Module):
 
         return tokens
 
-
-
-    def forward(self, x: torch.Tensor) -> DinoV3Output:
+    def forward(self, x: torch.Tensor):
         """
-        Returns DinoV3Output(tokens=[B,C,H/patch,W/patch])
+        Returns DinoV3Output(tokens=[B,C,H/16,W/16])
 
-        Fixes:
-        - Lazy-load timm model on CPU then input on CUDA -> moves model to x.device
-        - dtype/device mismatch inside timm patch_embed.proj -> aligns proj params to x
+        Backbone always runs FP32 (see _forward_tokens).
+        Output tokens are FP32; the rest of the network can still run under AMP.
         """
-        # --- lazy load (model created on CPU by default) ---
         if self.model is None:
             self.load()
-
-        # --- ensure the timm model is on the same device as the input ---
-        # (important because load() happens after parent .to(device) in your net)
-        try:
-            model_device = next(self.model.parameters()).device
-        except StopIteration:
-            model_device = x.device  # edge case: no parameters
-
-        if model_device != x.device:
-            self.model.to(device=x.device)
 
         B, _, H, W = x.shape
         if (H % self.patch_size) != 0 or (W % self.patch_size) != 0:
             raise ValueError(f"Input H,W must be divisible by {self.patch_size}, got {H}x{W}")
 
-        # --- HARD GUARANTEE: patch_embed.proj weights/bias match x device + dtype ---
-        # This prevents: "Input type (...) and weight/bias type (...) should be the same"
-        pe = getattr(self.model, "patch_embed", None)
-        if pe is not None and hasattr(pe, "proj"):
-            proj = pe.proj
-            # move module first (device), then fix dtype
-            if proj.weight.device != x.device:
-                proj.to(device=x.device)
-            if proj.weight.dtype != x.dtype:
-                proj.weight.data = proj.weight.data.to(dtype=x.dtype)
-            if proj.bias is not None and proj.bias.dtype != x.dtype:
-                proj.bias.data = proj.bias.data.to(dtype=x.dtype)
-
-        # --- forward tokens ---
-        tokens = self._forward_tokens(x)  # [B, N, C]
+        tokens = self._forward_tokens(x)  # [B, N, C] FP32
         B2, N, C = tokens.shape
 
         if self.embed_dim is None:
@@ -150,7 +128,7 @@ class DinoV3Backbone(nn.Module):
         gh, gw = H // self.patch_size, W // self.patch_size
         n_patches = gh * gw
 
-        # Robust slicing: last n_patches tokens are the spatial grid (drops CLS + register tokens)
+        # robust slicing: patch tokens are last n_patches tokens
         if self.remove_register_tokens:
             if N < (1 + n_patches):
                 raise RuntimeError(f"Token count {N} < 1+patches {1+n_patches}. Cannot slice.")
@@ -158,11 +136,11 @@ class DinoV3Backbone(nn.Module):
         else:
             patch_tokens = tokens[:, 1:1 + n_patches, :]
 
-        # Optional BN over feature dimension
+        # optional BN (fp32)
         if self.feature_norm is not None:
-            flat = patch_tokens.reshape(-1, C)  # [B*n_patches, C]
+            flat = patch_tokens.reshape(-1, C)
             flat = self.feature_norm(flat)
             patch_tokens = flat.view(B, n_patches, C)
 
-        feat = patch_tokens.transpose(1, 2).contiguous().view(B, C, gh, gw)  # [B,C,gh,gw]
+        feat = patch_tokens.transpose(1, 2).contiguous().view(B, C, gh, gw)  # [B,C,gh,gw] fp32
         return DinoV3Output(tokens=feat)

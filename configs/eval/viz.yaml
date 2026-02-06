@@ -1,5 +1,5 @@
 dataset:
-  root: tum_rgbd
+  root: src/dino_slam3/data/tum_rgbd
   sequences:
     - rgbd_dataset_freiburg1_xyz
   input_size: 448
@@ -12,6 +12,6 @@ camera:
   cy: 239.5
 
 model:
-  checkpoint: runs/tum_stage1_hybrid/checkpoints/epoch_20.pt
+  checkpoint: runs/tum_stage1_hybrid/checkpoints/best_model.pt
   patch_size: 16
   descriptor_dim: 128

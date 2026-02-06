@@ -53,39 +53,62 @@ model:
 
 training:
   epochs: 20
-  batch_size: 4
+  batch_size: 16              # H100: bump batch to give GPU more work (drop to 4 if you want)
   lr: 2.0e-4
   weight_decay: 1.0e-4
-  num_workers: 4
-  log_every: 25
-  save_every: 1
-  mixed_precision: false
+
+  # ---- FEED THE H100 ----
+  num_workers: 32            # was 4; 16 is a good start on 256GB RAM
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+
+  log_every: 50              # was 25; reduce prints/sync overhead
+  save_every: 1              # harmless; best_model.pt handled by trainer code
+
+  # ---- AMP (H100 likes BF16) ----
+  mixed_precision: true      # was false
+  amp_dtype: bf16            # new (trainer uses this)
+
+  # ---- CHECKPOINTS ----
+  save_last: true            # optional: writes last.pt; best always writes best_model.pt
 
 loss:
-  # Depth/pose supervision (primary)
   geom:
     weight: 1.0
     min_depth: 0.3
     max_depth: 6.0
     sample_points: 2048
-    reproj_px_thresh: 3.0
 
-  # Descriptor contrastive loss on depth-projected correspondences
+    # NEW: stop border/top collapse during supervision sampling
+    border_margin: 16
+
+    # NEW: used by new compute_losses() depth-consistency mask
+    depth_tolerance: 0.05
+
+    # (old reproj_px_thresh is not used by the new loss; keep if you want, but it's ignored)
+    # reproj_px_thresh: 3.0
+
   contrastive:
     weight: 2.0
     temperature: 0.07
-    num_negatives: 256
+    num_negatives: 32         # was 256; 256 is slow and not needed
 
-  # Repeatability (detector consistency under projection)
   repeatability:
     weight: 0.5
 
-  # Offset regression (sub-pixel refinement)
   offset:
     weight: 0.2
 
-  # Regularization to prevent collapse
   regularizers:
-    weight: 0.2
-    uniformity_weight: 1.0
-    entropy_weight: 0.5
+    # New reg is positive + non-constant; keep weight small so it doesn't dominate
+    weight: 0.05              # was 0.2
+
+    # NEW: replaces uniformity_weight in new loss
+    entropy_weight: 1.0
+    coverage_weight: 1.0
+    coverage_bins: 8
+
+    # (old keys are not used by the new regularizers; keep if you want, but ignored)
+    # uniformity_weight: 1.0
+    # entropy_weight: 0.5

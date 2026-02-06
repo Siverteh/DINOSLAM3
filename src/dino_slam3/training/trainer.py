@@ -26,30 +26,57 @@ def _make_loaders(cfg: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     def build(seqs, is_train: bool):
         datasets = []
         for s in seqs:
-            datasets.append(TUMRGBDDataset(
-                dataset_root=dcfg["root"],
-                sequence=s,
-                intrinsics=intr,
-                input_size=int(dcfg["input_size"]),
-                frame_spacing=int(dcfg["frame_spacing"]),
-                max_frames=dcfg.get("max_frames"),
-                augmentation=dcfg.get("augmentation"),
-                is_train=is_train,
-            ))
+            datasets.append(
+                TUMRGBDDataset(
+                    dataset_root=dcfg["root"],
+                    sequence=s,
+                    intrinsics=intr,
+                    input_size=int(dcfg["input_size"]),
+                    frame_spacing=int(dcfg["frame_spacing"]),
+                    max_frames=dcfg.get("max_frames"),
+                    augmentation=dcfg.get("augmentation"),
+                    is_train=is_train,
+                )
+            )
         return ConcatDataset(datasets)
 
     train_ds = build(dcfg["train_sequences"], True)
     val_ds = build(dcfg["val_sequences"], False)
 
     tcfg = cfg["training"]
+
+    # ---- dataloader knobs (defaults tuned for big machines / H100) ----
+    batch_size = int(tcfg["batch_size"])
+    num_workers = int(tcfg.get("num_workers", 16))  # raise this on 256GB RAM machines
+    pin_memory = bool(tcfg.get("pin_memory", True))
+    persistent_workers = bool(tcfg.get("persistent_workers", True))
+    prefetch_factor = int(tcfg.get("prefetch_factor", 4))
+
+    # If num_workers == 0, PyTorch disallows persistent_workers/prefetch_factor
+    dl_kwargs = dict(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=True,
+    )
+    if num_workers > 0:
+        dl_kwargs["persistent_workers"] = persistent_workers
+        dl_kwargs["prefetch_factor"] = prefetch_factor
+
     train_loader = DataLoader(
-        train_ds, batch_size=int(tcfg["batch_size"]), shuffle=True,
-        num_workers=int(tcfg["num_workers"]), pin_memory=True, drop_last=True
+        train_ds,
+        shuffle=True,
+        **dl_kwargs,
     )
+
+    val_kwargs = dict(dl_kwargs)
+    val_kwargs["drop_last"] = False
     val_loader = DataLoader(
-        val_ds, batch_size=int(tcfg["batch_size"]), shuffle=False,
-        num_workers=int(tcfg["num_workers"]), pin_memory=True, drop_last=False
+        val_ds,
+        shuffle=False,
+        **val_kwargs,
     )
+
     return train_loader, val_loader
 
 
@@ -82,10 +109,16 @@ def train(cfg: Dict[str, Any]) -> None:
     train_loader, val_loader = _make_loaders(cfg)
     model = _build_model(cfg).to(device)
 
-    opt = AdamW([p for p in model.parameters() if p.requires_grad],
-                lr=float(cfg["training"]["lr"]),
-                weight_decay=float(cfg["training"]["weight_decay"]))
-    sch = CosineAnnealingLR(opt, T_max=int(cfg["training"]["epochs"]), eta_min=float(cfg["training"].get("lr_min", 1e-6)))
+    opt = AdamW(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=float(cfg["training"]["lr"]),
+        weight_decay=float(cfg["training"]["weight_decay"]),
+    )
+    sch = CosineAnnealingLR(
+        opt,
+        T_max=int(cfg["training"]["epochs"]),
+        eta_min=float(cfg["training"].get("lr_min", 1e-6)),
+    )
 
     out_dir = ensure_dir(Path(cfg["run"]["out_dir"]) / cfg["run"]["name"])
     ckpt_dir = ensure_dir(out_dir / "checkpoints")
@@ -93,25 +126,49 @@ def train(cfg: Dict[str, Any]) -> None:
     epochs = int(cfg["training"]["epochs"])
     stride = int(cfg["model"]["fine_cnn"]["out_stride"])
 
-    scaler = torch.cuda.amp.GradScaler(enabled=bool(cfg["training"].get("mixed_precision", True)) and device.type == "cuda")
+    # ---- AMP settings (H100: BF16 is usually best) ----
+    mp_enabled = bool(cfg["training"].get("mixed_precision", True)) and device.type == "cuda"
+    amp_dtype_str = str(cfg["training"].get("amp_dtype", "bf16")).lower()
+    amp_dtype = torch.bfloat16 if amp_dtype_str in ("bf16", "bfloat16") else torch.float16
+
+    scaler = torch.amp.GradScaler("cuda", enabled=mp_enabled)
+
+    best_val = float("inf")
+    best_path = ckpt_dir / "best_model.pt"
+    last_path = ckpt_dir / "last.pt"
+
+    log_every = int(cfg["training"].get("log_every", 50))
+    save_last = bool(cfg["training"].get("save_last", True))
 
     for epoch in range(1, epochs + 1):
         lr = opt.param_groups[0]["lr"]
         print_epoch_header(epoch, epochs, lr)
 
+        # ----------------- TRAIN -----------------
         model.train()
-        train_metrics = {"loss_total": 0.0, "loss_contrastive": 0.0, "loss_repeat": 0.0, "loss_offset": 0.0, "loss_reg": 0.0}
+        train_metrics = {
+            "loss_total": 0.0,
+            "loss_contrastive": 0.0,
+            "loss_repeat": 0.0,
+            "loss_offset": 0.0,
+            "loss_reg": 0.0,
+        }
         n_train = 0
 
         pbar = tqdm(train_loader, desc="train", leave=False)
         for it, batch in enumerate(pbar, start=1):
+            # move batch to GPU
             for k, v in batch.items():
                 if torch.is_tensor(v):
                     batch[k] = v.to(device, non_blocking=True)
 
             opt.zero_grad(set_to_none=True)
 
-            with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
+            with torch.amp.autocast(
+                device_type="cuda",
+                dtype=amp_dtype,
+                enabled=scaler.is_enabled(),
+            ):
                 out1 = model(batch["rgb1"])
                 out2 = model(batch["rgb2"])
                 losses = compute_losses(batch, out1, out2, stride=stride, cfg=cfg["loss"])
@@ -121,33 +178,45 @@ def train(cfg: Dict[str, Any]) -> None:
             scaler.step(opt)
             scaler.update()
 
-            bs = batch["rgb1"].shape[0]
+            bs = int(batch["rgb1"].shape[0])
             n_train += bs
             for k in train_metrics:
                 train_metrics[k] += float(losses[k].detach().cpu()) * bs
 
-            if it % int(cfg["training"]["log_every"]) == 0:
-                pbar.set_postfix({k: f"{train_metrics[k]/max(n_train,1):.4f}" for k in ["loss_total", "loss_contrastive"]})
+            if log_every > 0 and (it % log_every == 0):
+                pbar.set_postfix(
+                    {
+                        "loss_total": f"{train_metrics['loss_total']/max(n_train,1):.4f}",
+                        "loss_contrastive": f"{train_metrics['loss_contrastive']/max(n_train,1):.4f}",
+                    }
+                )
 
         for k in train_metrics:
             train_metrics[k] /= max(n_train, 1)
 
-        # Validation
+        # ----------------- VAL -----------------
         model.eval()
         val_metrics = {k: 0.0 for k in train_metrics}
         n_val = 0
-        with torch.no_grad():
+        with torch.no_grad(), torch.amp.autocast(
+            device_type="cuda",
+            dtype=amp_dtype,
+            enabled=scaler.is_enabled(),
+        ):
             for batch in tqdm(val_loader, desc="val", leave=False):
                 for k, v in batch.items():
                     if torch.is_tensor(v):
                         batch[k] = v.to(device, non_blocking=True)
+
                 out1 = model(batch["rgb1"])
                 out2 = model(batch["rgb2"])
                 losses = compute_losses(batch, out1, out2, stride=stride, cfg=cfg["loss"])
-                bs = batch["rgb1"].shape[0]
+
+                bs = int(batch["rgb1"].shape[0])
                 n_val += bs
                 for k in val_metrics:
                     val_metrics[k] += float(losses[k].detach().cpu()) * bs
+
         for k in val_metrics:
             val_metrics[k] /= max(n_val, 1)
 
@@ -156,12 +225,32 @@ def train(cfg: Dict[str, Any]) -> None:
 
         sch.step()
 
-        # Save checkpoint
-        if epoch % int(cfg["training"]["save_every"]) == 0:
-            ckpt_path = ckpt_dir / f"epoch_{epoch:03d}.pt"
-            torch.save({
-                "epoch": epoch,
-                "model": model.state_dict(),
-                "optimizer": opt.state_dict(),
-                "config": cfg,
-            }, ckpt_path)
+        # ----------------- SAVE BEST -----------------
+        val_key = "loss_total"
+        val_score = float(val_metrics[val_key])
+
+        # Always save last (optional)
+        if save_last:
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "best_val": best_val,
+                    "model": model.state_dict(),
+                    "optimizer": opt.state_dict(),
+                    "config": cfg,
+                },
+                last_path,
+            )
+
+        if val_score < best_val:
+            best_val = val_score
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "best_val": best_val,
+                    "model": model.state_dict(),
+                    "optimizer": opt.state_dict(),
+                    "config": cfg,
+                },
+                best_path,
+            )

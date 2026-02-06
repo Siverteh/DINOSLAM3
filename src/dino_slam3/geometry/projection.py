@@ -61,8 +61,30 @@ def project(pts: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
     return torch.stack([u, v], dim=-1)
 
 def transform(T: torch.Tensor, pts: torch.Tensor) -> torch.Tensor:
-    """Apply SE(3) transform T (B,4,4) to pts (B,N,3)."""
-    B, N, _ = pts.shape
-    R = T[:, :3, :3]
-    t = T[:, :3, 3].unsqueeze(1)
-    return (R @ pts.transpose(1,2)).transpose(1,2) + t
+    """Apply SE(3) transform T (B,4,4) to pts (B,N,3). Returns (B,N,3).
+    Avoids cuBLAS batched GEMM (workaround for CUBLAS_STATUS_INVALID_VALUE on some stacks).
+    """
+    if T.dim() != 3 or T.shape[-2:] != (4, 4):
+        raise ValueError(f"T must be (B,4,4), got {tuple(T.shape)}")
+    if pts.dim() != 3 or pts.shape[-1] != 3:
+        raise ValueError(f"pts must be (B,N,3), got {tuple(pts.shape)}")
+
+    # Ensure device/dtype match
+    T = T.to(device=pts.device, dtype=pts.dtype)
+
+    R = T[:, :3, :3]        # (B,3,3)
+    t = T[:, :3, 3]         # (B,3)
+
+    x = pts[..., 0]         # (B,N)
+    y = pts[..., 1]
+    z = pts[..., 2]
+
+    # Explicit rotation (no matmul / no bmm)
+    X = R[:, 0, 0].unsqueeze(1) * x + R[:, 0, 1].unsqueeze(1) * y + R[:, 0, 2].unsqueeze(1) * z
+    Y = R[:, 1, 0].unsqueeze(1) * x + R[:, 1, 1].unsqueeze(1) * y + R[:, 1, 2].unsqueeze(1) * z
+    Z = R[:, 2, 0].unsqueeze(1) * x + R[:, 2, 1].unsqueeze(1) * y + R[:, 2, 2].unsqueeze(1) * z
+
+    out = torch.stack([X, Y, Z], dim=-1)  # (B,N,3)
+    out = out + t.unsqueeze(1)            # (B,N,3)
+    return out
+
