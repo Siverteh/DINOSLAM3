@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import cv2
+cv2.setNumThreads(0)
+cv2.ocl.setUseOpenCL(False)
 
 @dataclass
 class CameraIntrinsics:

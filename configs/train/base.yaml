@@ -2,7 +2,7 @@ device: auto
 
 run:
   out_dir: runs
-  name: tum_stage1_dinov3_refine_v1
+  name: default_run_name   # overwritten by stage config
 
 model:
   patch_size: 16
@@ -10,10 +10,9 @@ model:
   freeze_backbone: true
 
   dinov3:
-    # Small + fast default. You can scale up (B/L/H) once stable.
     name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
-    dtype: bf16              # bf16 recommended on H100
-    use_flash_attn: true     # if available in your torch build
+    dtype: bf16
+    use_flash_attn: true
 
   fine_cnn:
     channels: 96
@@ -23,24 +22,22 @@ model:
     descriptor_dim: 256
     detector:
       nms_radius: 6
-      tile_size: 16
+      tile_size: 8
       k_per_tile: 2
       max_keypoints: 1024
     reliability:
       enabled: true
     offset:
       enabled: true
-      max_offset: 0.50       # feature-coords, i.e. +-0.5 cell
+      max_offset: 0.50
 
 dataset:
   root: src/dino_slam3/data/tum_rgbd
   pad_to: 16
+
   frame_spacing_min: 1
   frame_spacing_max: 4
   max_frames: null
-
-  train_sequences: []
-  val_sequences: []
 
   association:
     max_rgb_depth_dt: 0.02
@@ -62,7 +59,7 @@ dataset:
 training:
   epochs: 20
   batch_size: 16
-  num_workers: 12
+  num_workers: 16
   lr: 2.0e-4
   weight_decay: 1.0e-4
   lr_min: 1.0e-6
@@ -77,16 +74,16 @@ training:
 loss:
   temperature: 0.07
 
-  match_radius_px: 4.0           # GT pixel-radius to declare a keypoint-set match
-  depth_consistency_m: 0.05      # depth-consistency threshold (meters)
+  match_radius_px: 4.0
+  depth_consistency_m: 0.05
   z_min_m: 0.10
 
   w_desc: 1.0
-  w_repeat: 0.50                 # repeatability (detector) warp loss
-  w_reliability: 0.50            # discriminativeness
-  w_sparsity: 0.10               # prevent “everything is a keypoint”
-  w_refine: 0.50                 # fine refinement reprojection
-  refine_window: 5               # 5x5 window on descriptor map around coarse match
+  w_repeat: 0.50
+  w_reliability: 0.50
+  w_sparsity: 0.10
+  w_refine: 0.50
+  refine_window: 5
 
   pose:
     enabled: true

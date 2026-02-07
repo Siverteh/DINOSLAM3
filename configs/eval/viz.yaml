@@ -1,7 +1,30 @@
 dataset:
   root: src/dino_slam3/data/tum_rgbd
   sequences:
+    # Freiburg1 (mostly easier / good sanity checks)
     - rgbd_dataset_freiburg1_xyz
+    - rgbd_dataset_freiburg1_rpy
+    - rgbd_dataset_freiburg1_desk
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_teddy
+
+    # Freiburg2 (harder: motion, lighting, dynamics)
+    - rgbd_dataset_freiburg2_xyz
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg2_dishes
+    - rgbd_dataset_freiburg2_flowerbouquet
+    - rgbd_dataset_freiburg2_coke
+    - rgbd_dataset_freiburg2_desk_with_person
+
+    # Freiburg3 (harder: walking, bigger spaces, more drift-prone)
+    - rgbd_dataset_freiburg3_walking_xyz
+    - rgbd_dataset_freiburg3_sitting_xyz
+    - rgbd_dataset_freiburg3_walking_rpy
+    - rgbd_dataset_freiburg3_long_office_household
+    - rgbd_dataset_freiburg3_structure_texture_near
+    - rgbd_dataset_freiburg3_structure_texture_far
+
   pad_to: 16
   frame_spacing_min: 1
   frame_spacing_max: 1
@@ -27,5 +50,5 @@ model:
     detector:
       nms_radius: 6
       max_keypoints: 1024
-      tile_size: 16
+      tile_size: 8
       k_per_tile: 2

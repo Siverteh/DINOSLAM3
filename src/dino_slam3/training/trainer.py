@@ -93,8 +93,100 @@ def _build_model(cfg: Dict[str, Any]) -> LocalFeatureNet:
 
 @torch.no_grad()
 def _val_diagnostics(cfg: Dict[str, Any], batch: Dict[str, torch.Tensor], out1, out2) -> Dict[str, float]:
+    import numpy as np
+    import cv2
+    import torch.nn.functional as F
+
+    def _as_bK(bK: torch.Tensor) -> torch.Tensor:
+        return bK.unsqueeze(0) if bK.dim() == 2 else bK
+
+    def _as_bT(bT: torch.Tensor) -> torch.Tensor:
+        return bT.unsqueeze(0) if bT.dim() == 2 else bT
+
+    def _mutual_nn_matches(d1: torch.Tensor, d2: torch.Tensor):
+        if d1.numel() == 0 or d2.numel() == 0:
+            return None, None
+        sim = d1 @ d2.t()
+        nn12 = sim.argmax(dim=1)
+        nn21 = sim.argmax(dim=0)
+        ids = torch.arange(sim.shape[0], device=sim.device)
+        mutual = (nn21[nn12] == ids)
+        idx1 = ids[mutual]
+        idx2 = nn12[mutual]
+        if idx1.numel() == 0:
+            return None, None
+        return idx1, idx2
+
+    def _sample_depth_bilinear(depth: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
+        # depth: (1,1,H,W), xy: (N,2)
+        H, W = depth.shape[-2:]
+        x = xy[:, 0]
+        y = xy[:, 1]
+        gx = (x / (W - 1)) * 2 - 1
+        gy = (y / (H - 1)) * 2 - 1
+        grid = torch.stack([gx, gy], dim=-1).view(1, -1, 1, 2)
+        z = F.grid_sample(depth, grid, mode="bilinear", padding_mode="zeros", align_corners=True)
+        return z.view(-1)
+
+    def _pnp_ransac_inliers(
+        xy1: torch.Tensor,
+        xy2: torch.Tensor,
+        depth1: torch.Tensor,
+        K: torch.Tensor,
+        reproj_px: float = 3.0,
+        z_min_m: float = 0.10,
+        max_iters: int = 2000,
+        conf: float = 0.999,
+    ) -> Tuple[int, float]:
+        if xy1.numel() == 0:
+            return 0, 0.0
+        z = _sample_depth_bilinear(depth1, xy1)
+        valid = torch.isfinite(z) & (z > z_min_m)
+        if valid.sum().item() < 6:
+            return 0, 0.0
+        xy1v = xy1[valid]
+        xy2v = xy2[valid]
+        zv = z[valid]
+
+        fx = float(K[0, 0].item())
+        fy = float(K[1, 1].item())
+        cx = float(K[0, 2].item())
+        cy = float(K[1, 2].item())
+
+        X = (xy1v[:, 0] - cx) / fx * zv
+        Y = (xy1v[:, 1] - cy) / fy * zv
+        Z = zv
+        pts3d = torch.stack([X, Y, Z], dim=-1)
+
+        obj = pts3d.detach().cpu().numpy().astype(np.float32)
+        img = xy2v.detach().cpu().numpy().astype(np.float32)
+        Kcv = K.detach().cpu().numpy().astype(np.float64)
+
+        if obj.shape[0] < 6:
+            return 0, 0.0
+
+        ok, rvec, tvec, inliers = cv2.solvePnPRansac(
+            objectPoints=obj,
+            imagePoints=img,
+            cameraMatrix=Kcv,
+            distCoeffs=None,
+            flags=cv2.SOLVEPNP_EPNP,
+            reprojectionError=float(reproj_px),
+            iterationsCount=int(max_iters),
+            confidence=float(conf),
+        )
+        if not ok or inliers is None:
+            return 0, 0.0
+        ninl = int(inliers.shape[0])
+        ratio = ninl / float(obj.shape[0])
+        return ninl, float(ratio)
+
     stride = int(cfg["model"].get("stride", 4))
     det = cfg["model"]["heads"]["detector"]
+    loss_cfg = cfg.get("loss", {})
+    inlier_px = float(loss_cfg.get("diag_inlier_px", 3.0))
+    pnp_px = float(loss_cfg.get("diag_pnp_px", 3.0))
+    z_min = float(loss_cfg.get("z_min_m", 0.10))
 
     k1 = extract_keypoints_torch(
         out1.heatmap, out1.desc, out1.offset, out1.reliability,
@@ -115,44 +207,72 @@ def _val_diagnostics(cfg: Dict[str, Any], batch: Dict[str, torch.Tensor], out1, 
         valid_mask_img=batch.get("valid_depth2", None),
     )
 
-    B = batch["rgb1"].shape[0]
-    # Evaluate only first sample for simplicity
-    xy1 = k1.xy_img[0:1]
-    xy2 = k2.xy_img[0:1]
+    # only first sample
     d1 = k1.desc[0]
     d2 = k2.desc[0]
+    xy1_all = k1.xy_img[0]
+    xy2_all = k2.xy_img[0]
 
     if d1.numel() == 0 or d2.numel() == 0:
-        return {"kpts1": 0.0, "kpts2": 0.0, "matches": 0.0, "valid_match_ratio": 0.0, "inlier_rate@3px": 0.0,
-                "mean_reproj_err": 0.0, "mean_reproj_err_inliers": 0.0, "median_reproj_err_inliers": 0.0}
+        return {
+            "kpts1": float(d1.shape[0] if d1.dim() > 0 else 0),
+            "kpts2": float(d2.shape[0] if d2.dim() > 0 else 0),
+            "matches": 0.0,
+            "valid_match_ratio": 0.0,
+            f"inlier_rate@{inlier_px:.0f}px": 0.0,
+            f"inliers@{inlier_px:.0f}px": 0.0,
+            f"pnp_inliers@{pnp_px:.0f}px": 0.0,
+            f"pnp_inlier_rate@{pnp_px:.0f}px": 0.0,
+            "mean_reproj_err": 0.0,
+            "mean_reproj_err_inliers": 0.0,
+            "median_reproj_err_inliers": 0.0,
+        }
 
-    sim = (d1 @ d2.t())
-    nn12 = sim.argmax(dim=1)
-    nn21 = sim.argmax(dim=0)
-    ids = torch.arange(sim.shape[0], device=sim.device)
-    mutual = (nn21[nn12] == ids)
-    idx1 = ids[mutual]
-    idx2 = nn12[mutual]
+    idx1, idx2 = _mutual_nn_matches(d1, d2)
+    if idx1 is None:
+        return {
+            "kpts1": float(d1.shape[0]),
+            "kpts2": float(d2.shape[0]),
+            "matches": 0.0,
+            "valid_match_ratio": 0.0,
+            f"inlier_rate@{inlier_px:.0f}px": 0.0,
+            f"inliers@{inlier_px:.0f}px": 0.0,
+            f"pnp_inliers@{pnp_px:.0f}px": 0.0,
+            f"pnp_inlier_rate@{pnp_px:.0f}px": 0.0,
+            "mean_reproj_err": 0.0,
+            "mean_reproj_err_inliers": 0.0,
+            "median_reproj_err_inliers": 0.0,
+        }
 
-    mcount = int(idx1.numel())
+    idx1 = idx1.long()
+    idx2 = idx2.long()
+    xy1m = xy1_all[idx1].view(1, -1, 2)
+    xy2m = xy2_all[idx2].view(1, -1, 2)
+
+    mcount = int(xy1m.shape[1])
     if mcount == 0:
-        return {"kpts1": float(d1.shape[0]), "kpts2": float(d2.shape[0]), "matches": 0.0, "valid_match_ratio": 0.0,
-                "inlier_rate@3px": 0.0, "mean_reproj_err": 0.0, "mean_reproj_err_inliers": 0.0, "median_reproj_err_inliers": 0.0}
+        return {
+            "kpts1": float(d1.shape[0]),
+            "kpts2": float(d2.shape[0]),
+            "matches": 0.0,
+            "valid_match_ratio": 0.0,
+            f"inlier_rate@{inlier_px:.0f}px": 0.0,
+            f"inliers@{inlier_px:.0f}px": 0.0,
+            f"pnp_inliers@{pnp_px:.0f}px": 0.0,
+            f"pnp_inlier_rate@{pnp_px:.0f}px": 0.0,
+            "mean_reproj_err": 0.0,
+            "mean_reproj_err_inliers": 0.0,
+            "median_reproj_err_inliers": 0.0,
+        }
 
-    depth1 = batch["depth1"][0:1]
-    K = batch["K"]
-    if K.dim() == 2:
-        K = K.unsqueeze(0)
-    T21 = batch["relative_pose"]
-    if T21.dim() == 2:
-        T21 = T21.unsqueeze(0)
+    depth1 = batch["depth1"][0:1]  # (1,1,H,W)
+    Kb = _as_bK(batch["K"])[0:1]
+    T21 = _as_bT(batch["relative_pose"])[0:1]
 
-    xy1m = xy1[:, idx1, :]
-    xy2m = xy2[:, idx2, :]
-
-    pts1 = unproject(depth1, K[0:1], xy1m)
-    pts2 = transform(T21[0:1], pts1)
-    xy2_gt = project(pts2, K[0:1])
+    # GT reprojection
+    pts1 = unproject(depth1, Kb, xy1m)
+    pts2 = transform(T21, pts1)
+    xy2_gt = project(pts2, Kb)
 
     H, W = depth1.shape[-2:]
     xg, yg = xy2_gt[..., 0], xy2_gt[..., 1]
@@ -162,26 +282,54 @@ def _val_diagnostics(cfg: Dict[str, Any], batch: Dict[str, torch.Tensor], out1, 
     err = torch.linalg.norm(xy2_gt - xy2m, dim=-1)[0]
     err_v = err[inb[0]]
     if err_v.numel() == 0:
-        return {"kpts1": float(d1.shape[0]), "kpts2": float(d2.shape[0]), "matches": float(mcount),
-                "valid_match_ratio": valid_ratio, "inlier_rate@3px": 0.0,
-                "mean_reproj_err": 0.0, "mean_reproj_err_inliers": 0.0, "median_reproj_err_inliers": 0.0}
+        return {
+            "kpts1": float(d1.shape[0]),
+            "kpts2": float(d2.shape[0]),
+            "matches": float(mcount),
+            "valid_match_ratio": valid_ratio,
+            f"inlier_rate@{inlier_px:.0f}px": 0.0,
+            f"inliers@{inlier_px:.0f}px": 0.0,
+            f"pnp_inliers@{pnp_px:.0f}px": 0.0,
+            f"pnp_inlier_rate@{pnp_px:.0f}px": 0.0,
+            "mean_reproj_err": 0.0,
+            "mean_reproj_err_inliers": 0.0,
+            "median_reproj_err_inliers": 0.0,
+        }
 
-    inl = err_v < 3.0
+    inl = err_v < inlier_px
+    inlier_count = int(inl.sum().item())
     inlier_rate = float(inl.float().mean().item())
     mean_all = float(err_v.mean().item())
     mean_inl = float(err_v[inl].mean().item()) if inl.any() else 0.0
     med_inl = float(err_v[inl].median().item()) if inl.any() else 0.0
+
+    # PnP-RANSAC on CPU (OpenCV)
+    ninl_pnp, rate_pnp = _pnp_ransac_inliers(
+        xy1=xy1m[0],
+        xy2=xy2m[0],
+        depth1=depth1,
+        K=Kb[0],
+        reproj_px=pnp_px,
+        z_min_m=z_min,
+    )
 
     return {
         "kpts1": float(d1.shape[0]),
         "kpts2": float(d2.shape[0]),
         "matches": float(mcount),
         "valid_match_ratio": valid_ratio,
-        "inlier_rate@3px": inlier_rate,
+
+        f"inliers@{inlier_px:.0f}px": float(inlier_count),
+        f"inlier_rate@{inlier_px:.0f}px": float(inlier_rate),
+
+        f"pnp_inliers@{pnp_px:.0f}px": float(ninl_pnp),
+        f"pnp_inlier_rate@{pnp_px:.0f}px": float(rate_pnp),
+
         "mean_reproj_err": mean_all,
         "mean_reproj_err_inliers": mean_inl,
         "median_reproj_err_inliers": med_inl,
     }
+
 
 def train(cfg: Dict[str, Any]) -> None:
     device = _device(cfg)
@@ -259,7 +407,19 @@ def train(cfg: Dict[str, Any]) -> None:
         model.eval()
         val_m = {k: 0.0 for k in train_m}
         n_val = 0
-        diag_acc = {k: 0.0 for k in ["kpts1","kpts2","matches","valid_match_ratio","inlier_rate@3px","mean_reproj_err","mean_reproj_err_inliers","median_reproj_err_inliers"]}
+        inlier_px = float(cfg.get("loss", {}).get("diag_inlier_px", 3.0))
+        pnp_px = float(cfg.get("loss", {}).get("diag_pnp_px", 3.0))
+
+        diag_keys = [
+            "kpts1","kpts2","matches","valid_match_ratio",
+            f"inliers@{inlier_px:.0f}px",
+            f"inlier_rate@{inlier_px:.0f}px",
+            f"pnp_inliers@{pnp_px:.0f}px",
+            f"pnp_inlier_rate@{pnp_px:.0f}px",
+            "mean_reproj_err","mean_reproj_err_inliers","median_reproj_err_inliers"
+        ]
+        diag_acc = {k: 0.0 for k in diag_keys}
+
         diag_batches = 0
 
         with torch.no_grad():

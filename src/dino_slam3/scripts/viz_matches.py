@@ -89,7 +89,7 @@ def _draw_matches_custom(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True, type=str)
-    ap.add_argument("--ckpt", required=True, type=str)
+    ap.add_argument("--ckpt", default="runs/tum_stage1_dinov3_refine_v1/checkpoints/best.pt", type=str)
     ap.add_argument("--sequence", type=str, default=None)
     ap.add_argument("--out", default="runs/viz/matches_inliers.png")
     ap.add_argument("--max_lines", type=int, default=250)
