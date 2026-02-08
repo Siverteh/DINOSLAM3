@@ -1,21 +1,54 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Dict, Any
 from rich.console import Console
 from rich.table import Table
 
-console = Console()
+_console = Console()
 
 def print_epoch_header(epoch: int, epochs: int, lr: float) -> None:
-    console.rule(f"[bold]Epoch {epoch}/{epochs}[/bold]  lr={lr:.2e}")
+    _console.rule(f"[bold]Epoch {epoch}/{epochs}  lr={lr:.2e}[/bold]")
 
-def print_metrics_table(title: str, metrics: Dict[str, Any]) -> None:
-    table = Table(title=title, show_header=True, header_style="bold magenta")
-    table.add_column("Metric")
+def print_metrics_table(title: str, metrics: Dict[str, float]) -> None:
+    table = Table(title=title)
+    table.add_column("Metric", justify="left")
     table.add_column("Value", justify="right")
-    for k, v in metrics.items():
-        if isinstance(v, float):
-            table.add_row(k, f"{v:.6f}")
-        else:
-            table.add_row(k, str(v))
-    console.print(table)
+
+    preferred = [
+        "loss_total",
+        "loss_desc",
+        "loss_repeat",
+        "loss_rel",
+        "loss_refine",
+        "loss_pose",
+        "loss_sparsity",
+        "valid_ratio",
+    ]
+    keys = [k for k in preferred if k in metrics] + [k for k in metrics.keys() if k not in preferred]
+    for k in keys:
+        v = metrics[k]
+        table.add_row(k, f"{v:.6f}" if isinstance(v, float) else str(v))
+    _console.print(table)
+
+def print_save_notice(path: str, reason: str) -> None:
+    _console.print(f"[green]Saved checkpoint ({reason}):[/green] {path}")
+
+def print_match_table(title: str, diag: Dict[str, Any]) -> None:
+    table = Table(title=title)
+    table.add_column("Match/Geom Metric", justify="left")
+    table.add_column("Value", justify="right")
+
+    preferred = [
+        "kpts1",
+        "kpts2",
+        "matches",
+        "valid_match_ratio",
+        "inlier_rate@3px",
+        "mean_reproj_err",
+        "mean_reproj_err_inliers",
+        "median_reproj_err_inliers",
+    ]
+    keys = [k for k in preferred if k in diag] + [k for k in diag.keys() if k not in preferred]
+    for k in keys:
+        v = diag.get(k, 0.0)
+        table.add_row(k, f"{v:.4f}" if isinstance(v, float) else str(v))
+    _console.print(table)

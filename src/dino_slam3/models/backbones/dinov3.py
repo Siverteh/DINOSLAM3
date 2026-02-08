@@ -1,146 +1,106 @@
-import timm
-import torch
-from torch import amp
-import torch.nn as nn
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional
 
+import torch
+import torch.nn as nn
+from transformers import AutoModel
+
 
 @dataclass
-class DinoV3Output:
-    tokens: torch.Tensor  # [B, C, H/patch, W/patch]
+class DinoTokens:
+    tokens: torch.Tensor  # (B, C, H/ps, W/ps)
 
 
 class DinoV3Backbone(nn.Module):
+    """
+    DINOv3 backbone via HuggingFace Transformers.
+    Returns patch tokens reshaped to (B, C, H/ps, W/ps).
+
+    H100 FIX (bulletproof):
+      - Run backbone in pure FP32 with autocast disabled.
+      - This avoids cublasGemmEx fp16/bf16 INVALID_VALUE issues seen on some H100 stacks.
+      - Keep AMP for the rest of your network (heads) outside this backbone.
+    """
+
     def __init__(
         self,
+        name_or_path: str,
         patch_size: int = 16,
-        model_name: str = "vit_small_patch16_dinov3.lvd1689m",
         freeze: bool = True,
-        use_feature_bn: bool = False,
-        remove_register_tokens: bool = True,
+        dtype: str = "fp32",  # ignored on CUDA: we force fp32
     ):
         super().__init__()
-        self.model_name = model_name
-        self.freeze = freeze
-        self.use_feature_bn = use_feature_bn
-        self.remove_register_tokens = remove_register_tokens
-
-        # IMPORTANT: must match what network.py passes in
+        self.name_or_path = str(name_or_path)
         self.patch_size = int(patch_size)
+        self.freeze = bool(freeze)
+        self.dtype_name = str(dtype).lower()
 
         self.model: Optional[nn.Module] = None
         self.embed_dim: Optional[int] = None
-
-        self.feature_norm: Optional[nn.BatchNorm1d] = None
-
-        # If you want eager loading, uncomment next line:
-        # self.load()
+        self.num_register_tokens: int = 0
+        self._loaded: bool = False
 
     def load(self) -> None:
-        # Create model
-        self.model = timm.create_model(
-            self.model_name,
-            pretrained=True,
-            dynamic_img_size=True,
-        )
+        # Load on CPU first; we'll move to GPU on first forward() based on x.device.
+        self.model = AutoModel.from_pretrained(self.name_or_path, trust_remote_code=True)
+        self.model.eval()
 
-        # Infer embed dim
-        self.embed_dim = getattr(self.model, "embed_dim", None) or getattr(self.model, "num_features", None)
-        if self.embed_dim is None:
-            raise RuntimeError("Could not infer embed_dim from timm model.")
+        cfg = getattr(self.model, "config", None)
+        if cfg is not None:
+            self.embed_dim = int(getattr(cfg, "hidden_size", getattr(cfg, "embed_dim", 0)) or 0)
+            self.num_register_tokens = int(getattr(cfg, "num_register_tokens", 0) or 0)
+        else:
+            self.embed_dim = None
+            self.num_register_tokens = 0
 
-        # Optional BN over feature dimension
-        if self.use_feature_bn:
-            self.feature_norm = nn.BatchNorm1d(self.embed_dim, affine=True)
-
-        # Freeze backbone
         if self.freeze:
             for p in self.model.parameters():
-                p.requires_grad = False
+                p.requires_grad_(False)
+
+        self._loaded = True
+
+    def _ensure_on_device_fp32(self, device: torch.device) -> None:
+        assert self.model is not None
+        cur_dev = next(self.model.parameters()).device
+        cur_dtype = next(self.model.parameters()).dtype
+
+        if cur_dev != device or cur_dtype != torch.float32:
+            self.model.to(device=device, dtype=torch.float32)
             self.model.eval()
+            if self.freeze:
+                for p in self.model.parameters():
+                    p.requires_grad_(False)
 
-    @torch.no_grad()
-    def _forward_tokens(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Return token embeddings [B, N, C] from timm ViT/EVA.
+    def forward(self, x: torch.Tensor) -> DinoTokens:
+        assert self.model is not None and self._loaded, "Call load() before forward()"
+        assert x.dim() == 4 and x.size(1) == 3, "Expected input (B,3,H,W)"
 
-        HARD FIX:
-          - Always run backbone in FP32
-          - Always disable autocast inside backbone to avoid BF16 GEMMEx issues on some stacks
-        """
-        if self.model is None:
-            raise RuntimeError("DinoV3Backbone.model is None. Did you call load()?")
-
-        if not hasattr(self.model, "forward_features"):
-            raise RuntimeError("timm model has no forward_features(); cannot extract tokens reliably.")
-
-        # Ensure model is on correct device and in fp32
-        if next(self.model.parameters()).device != x.device:
-            self.model.to(device=x.device)
-        if next(self.model.parameters()).dtype != torch.float32:
-            self.model.to(dtype=torch.float32)
-
-        # Disable autocast inside backbone and cast input to fp32
-        device_type = "cuda" if x.is_cuda else "cpu"
-        with torch.amp.autocast(device_type=device_type, enabled=False):
-            x_fp32 = x.float()
-            tokens = self.model.forward_features(x_fp32)
-
-        # timm may return dict
-        if isinstance(tokens, dict):
-            if "x" in tokens:
-                tokens = tokens["x"]
-            elif "last_hidden_state" in tokens:
-                tokens = tokens["last_hidden_state"]
-            else:
-                raise RuntimeError(f"Unknown forward_features dict keys: {list(tokens.keys())}")
-
-        if tokens.dim() != 3:
-            raise RuntimeError(f"Expected tokens [B,N,C], got shape {tuple(tokens.shape)}")
-
-        return tokens
-
-    def forward(self, x: torch.Tensor):
-        """
-        Returns DinoV3Output(tokens=[B,C,H/16,W/16])
-
-        Backbone always runs FP32 (see _forward_tokens).
-        Output tokens are FP32; the rest of the network can still run under AMP.
-        """
-        if self.model is None:
-            self.load()
+        # Avoid weird strides/layouts that can trigger GEMM edge-cases
+        x = x.contiguous()
 
         B, _, H, W = x.shape
-        if (H % self.patch_size) != 0 or (W % self.patch_size) != 0:
-            raise ValueError(f"Input H,W must be divisible by {self.patch_size}, got {H}x{W}")
+        ps = self.patch_size
+        if (H % ps) != 0 or (W % ps) != 0:
+            raise ValueError(f"Input must be padded to patch size {ps}. Got H={H}, W={W}")
 
-        tokens = self._forward_tokens(x)  # [B, N, C] FP32
-        B2, N, C = tokens.shape
+        # Force backbone to FP32 on whatever device x is on
+        self._ensure_on_device_fp32(x.device)
 
-        if self.embed_dim is None:
-            raise RuntimeError("embed_dim is None; load() did not set it.")
-        if B2 != B:
-            raise RuntimeError(f"Token batch {B2} != input batch {B}")
-        if C != self.embed_dim:
-            raise RuntimeError(f"Token dim C={C} does not match embed_dim={self.embed_dim}")
+        # Run backbone with autocast OFF (pure fp32)
+        with torch.autocast(device_type="cuda", enabled=False):
+            out = self.model(pixel_values=x.float(), return_dict=True)
 
-        gh, gw = H // self.patch_size, W // self.patch_size
-        n_patches = gh * gw
+        tokens = out.last_hidden_state  # (B, seq, C)
 
-        # robust slicing: patch tokens are last n_patches tokens
-        if self.remove_register_tokens:
-            if N < (1 + n_patches):
-                raise RuntimeError(f"Token count {N} < 1+patches {1+n_patches}. Cannot slice.")
-            patch_tokens = tokens[:, -n_patches:, :]  # [B, n_patches, C]
-        else:
-            patch_tokens = tokens[:, 1:1 + n_patches, :]
+        # Layout: [CLS] + [REG]*n + [PATCHES]
+        start = 1 + int(self.num_register_tokens)
+        patch_tokens = tokens[:, start:, :]  # (B, N, C)
 
-        # optional BN (fp32)
-        if self.feature_norm is not None:
-            flat = patch_tokens.reshape(-1, C)
-            flat = self.feature_norm(flat)
-            patch_tokens = flat.view(B, n_patches, C)
+        Ht = H // ps
+        Wt = W // ps
 
-        feat = patch_tokens.transpose(1, 2).contiguous().view(B, C, gh, gw)  # [B,C,gh,gw] fp32
-        return DinoV3Output(tokens=feat)
+        # (B, N, C) -> (B, C, Ht, Wt)
+        patch_tokens = patch_tokens.transpose(1, 2).contiguous().reshape(B, -1, Ht, Wt)
+        return DinoTokens(tokens=patch_tokens)

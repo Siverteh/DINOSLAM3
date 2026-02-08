@@ -1,17 +1,54 @@
 dataset:
   root: src/dino_slam3/data/tum_rgbd
   sequences:
+    # Freiburg1 (mostly easier / good sanity checks)
     - rgbd_dataset_freiburg1_xyz
-  input_size: 448
-  frame_spacing: 1
+    - rgbd_dataset_freiburg1_rpy
+    - rgbd_dataset_freiburg1_desk
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_teddy
 
-camera:
-  fx: 525.0
-  fy: 525.0
-  cx: 319.5
-  cy: 239.5
+    # Freiburg2 (harder: motion, lighting, dynamics)
+    - rgbd_dataset_freiburg2_xyz
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg2_dishes
+    - rgbd_dataset_freiburg2_flowerbouquet
+    - rgbd_dataset_freiburg2_coke
+    - rgbd_dataset_freiburg2_desk_with_person
+
+    # Freiburg3 (harder: walking, bigger spaces, more drift-prone)
+    - rgbd_dataset_freiburg3_walking_xyz
+    - rgbd_dataset_freiburg3_sitting_xyz
+    - rgbd_dataset_freiburg3_walking_rpy
+    - rgbd_dataset_freiburg3_long_office_household
+    - rgbd_dataset_freiburg3_structure_texture_near
+    - rgbd_dataset_freiburg3_structure_texture_far
+
+  pad_to: 16
+  frame_spacing_min: 1
+  frame_spacing_max: 1
+  association:
+    max_rgb_depth_dt: 0.02
+    max_rgb_gt_dt: 0.02
 
 model:
-  checkpoint: runs/tum_stage1_hybrid/checkpoints/best_model.pt
   patch_size: 16
-  descriptor_dim: 128
+  stride: 4
+  dinov3:
+    name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
+    dtype: bf16   # doesn’t matter much now since backbone is forced fp32 in your dinov3.py
+  fine_cnn:
+    channels: 96
+    num_blocks: 8
+  heads:
+    descriptor_dim: 256
+    offset:
+      enabled: true
+    reliability:
+      enabled: true
+    detector:
+      nms_radius: 6
+      max_keypoints: 1024
+      tile_size: 8
+      k_per_tile: 2

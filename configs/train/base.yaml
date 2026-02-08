@@ -1,0 +1,93 @@
+device: auto
+
+run:
+  out_dir: runs
+  name: default_run_name   # overwritten by stage config
+
+model:
+  patch_size: 16
+  stride: 4
+  freeze_backbone: true
+
+  dinov3:
+    name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
+    dtype: bf16
+    use_flash_attn: true
+
+  fine_cnn:
+    channels: 96
+    num_blocks: 8
+
+  heads:
+    descriptor_dim: 256
+    detector:
+      nms_radius: 6
+      tile_size: 8
+      k_per_tile: 2
+      max_keypoints: 1024
+    reliability:
+      enabled: true
+    offset:
+      enabled: true
+      max_offset: 0.50
+
+dataset:
+  root: src/dino_slam3/data/tum_rgbd
+  pad_to: 16
+
+  frame_spacing_min: 1
+  frame_spacing_max: 4
+  max_frames: null
+
+  association:
+    max_rgb_depth_dt: 0.02
+    max_rgb_gt_dt: 0.02
+
+  augmentation:
+    photometric:
+      enabled: true
+      brightness: 0.20
+      contrast: 0.20
+      saturation: 0.10
+      hue: 0.05
+    blur:
+      enabled: true
+      p: 0.10
+      kmin: 3
+      kmax: 7
+
+training:
+  epochs: 20
+  batch_size: 16
+  num_workers: 16
+  lr: 2.0e-4
+  weight_decay: 1.0e-4
+  lr_min: 1.0e-6
+
+  mixed_precision: true
+  amp_dtype: bf16
+
+  log_every: 50
+  diag_batches: 3
+  save_every_epoch: true
+
+loss:
+  temperature: 0.07
+
+  match_radius_px: 4.0
+  depth_consistency_m: 0.05
+  z_min_m: 0.10
+
+  w_desc: 1.0
+  w_repeat: 0.50
+  w_reliability: 0.50
+  w_sparsity: 0.10
+  w_refine: 0.50
+  refine_window: 5
+
+  pose:
+    enabled: true
+    warmup_epochs: 3
+    w_pose: 0.10
+    w_rot: 1.0
+    w_trans: 1.0

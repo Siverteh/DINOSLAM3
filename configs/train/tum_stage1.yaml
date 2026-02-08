@@ -1,114 +1,59 @@
-run:
-  name: tum_stage1_hybrid
-  out_dir: runs
+base: base.yaml
 
-device: auto
-seed: 42
+run:
+  name: tum_stage1_dinov3_refine_v1
 
 dataset:
-  type: tum_rgbd
-  root: src/dino_slam3/data/tum_rgbd
+  # Use many sequences; avoid *_validation (no GT).
+  # This list comes from the official download page categories.
+  # You can move hard sequences (nostructure/dynamic) into val/test if desired.
   train_sequences:
     - rgbd_dataset_freiburg1_xyz
-    - rgbd_dataset_freiburg1_room
-    - rgbd_dataset_freiburg2_xyz
-    - rgbd_dataset_freiburg3_sitting_xyz
-  val_sequences:
+    - rgbd_dataset_freiburg1_rpy
+    - rgbd_dataset_freiburg1_floor
     - rgbd_dataset_freiburg1_desk
-  input_size: 448
-  frame_spacing: 1
-  max_frames: null
-  augmentation:
-    enabled: true
-    brightness: 0.2
-    contrast: 0.2
-    saturation: 0.2
-    hue: 0.05
-    gaussian_blur: 0.2
+    - rgbd_dataset_freiburg1_desk2
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg1_360
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_teddy
 
-camera:
-  # Intrinsics at ORIGINAL TUM resolution (usually 640x480). They will be scaled to input_size.
-  fx: 525.0
-  fy: 525.0
-  cx: 319.5
-  cy: 239.5
+    - rgbd_dataset_freiburg2_xyz
+    - rgbd_dataset_freiburg2_rpy
+    - rgbd_dataset_freiburg2_360_hemisphere
+    - rgbd_dataset_freiburg2_360_kidnap
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg2_pioneer_360
+    - rgbd_dataset_freiburg2_pioneer_slam
+    - rgbd_dataset_freiburg2_pioneer_slam2
+    - rgbd_dataset_freiburg2_pioneer_slam3
+    - rgbd_dataset_freiburg2_dishes
+    - rgbd_dataset_freiburg2_flowerbouquet
+    - rgbd_dataset_freiburg2_flowerbouquet_brownbackground
+    - rgbd_dataset_freiburg2_metallic_sphere
+    - rgbd_dataset_freiburg2_metallic_sphere2
+    - rgbd_dataset_freiburg2_coke
+    - rgbd_dataset_freiburg2_desk_with_person
 
-model:
-  backbone: dinov3
-  patch_size: 16
-  descriptor_dim: 128
-  fine_cnn:
-    enabled: true
-    channels: 64
-    num_blocks: 6
-    out_stride: 4   # fine features at H/4 × W/4
-  heads:
-    detector:
-      nms_radius: 4
-      max_keypoints: 1024
-    offset:
-      enabled: true
-    reliability:
-      enabled: true
+    - rgbd_dataset_freiburg3_long_office_household
+    - rgbd_dataset_freiburg3_structure_texture_near
+    - rgbd_dataset_freiburg3_structure_texture_far
+    - rgbd_dataset_freiburg3_walking_xyz
+    - rgbd_dataset_freiburg3_sitting_xyz
+    - rgbd_dataset_freiburg3_walking_halfsphere
+    - rgbd_dataset_freiburg3_sitting_halfsphere
+    - rgbd_dataset_freiburg3_walking_rpy
+    - rgbd_dataset_freiburg3_sitting_rpy
+    - rgbd_dataset_freiburg3_teddy
+    - rgbd_dataset_freiburg3_cabinet
+    - rgbd_dataset_freiburg3_large_cabinet
+
+  val_sequences:
+    - rgbd_dataset_freiburg1_xyz
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg3_walking_xyz
 
 training:
   epochs: 20
-  batch_size: 16              # H100: bump batch to give GPU more work (drop to 4 if you want)
-  lr: 2.0e-4
-  weight_decay: 1.0e-4
-
-  # ---- FEED THE H100 ----
-  num_workers: 32            # was 4; 16 is a good start on 256GB RAM
-  pin_memory: true
-  persistent_workers: true
-  prefetch_factor: 4
-
-  log_every: 50              # was 25; reduce prints/sync overhead
-  save_every: 1              # harmless; best_model.pt handled by trainer code
-
-  # ---- AMP (H100 likes BF16) ----
-  mixed_precision: true      # was false
-  amp_dtype: bf16            # new (trainer uses this)
-
-  # ---- CHECKPOINTS ----
-  save_last: true            # optional: writes last.pt; best always writes best_model.pt
-
-loss:
-  geom:
-    weight: 1.0
-    min_depth: 0.3
-    max_depth: 6.0
-    sample_points: 2048
-
-    # NEW: stop border/top collapse during supervision sampling
-    border_margin: 16
-
-    # NEW: used by new compute_losses() depth-consistency mask
-    depth_tolerance: 0.05
-
-    # (old reproj_px_thresh is not used by the new loss; keep if you want, but it's ignored)
-    # reproj_px_thresh: 3.0
-
-  contrastive:
-    weight: 2.0
-    temperature: 0.07
-    num_negatives: 32         # was 256; 256 is slow and not needed
-
-  repeatability:
-    weight: 0.5
-
-  offset:
-    weight: 0.2
-
-  regularizers:
-    # New reg is positive + non-constant; keep weight small so it doesn't dominate
-    weight: 0.05              # was 0.2
-
-    # NEW: replaces uniformity_weight in new loss
-    entropy_weight: 1.0
-    coverage_weight: 1.0
-    coverage_bins: 8
-
-    # (old keys are not used by the new regularizers; keep if you want, but ignored)
-    # uniformity_weight: 1.0
-    # entropy_weight: 0.5
+  batch_size: 16
+  num_workers: 16

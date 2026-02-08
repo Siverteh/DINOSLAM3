@@ -1,0 +1,25 @@
+dataset:
+  root: src/dino_slam3/data/tum_rgbd
+  sequences:
+    - rgbd_dataset_freiburg1_desk
+  frame_spacing: 1
+  max_association_dt: 0.02
+  pad_to: 16
+
+camera:
+  fx: 525.0
+  fy: 525.0
+  cx: 319.5
+  cy: 239.5
+
+model:
+  checkpoint: runs/tum_stage1_working_v2/checkpoints/best.pt
+  patch_size: 16
+  descriptor_dim: 128
+  stride: 4
+  heads:
+    detector:
+      nms_radius: 4
+      max_keypoints: 1024
+      tile_size: 16
+      k_per_tile: 8
