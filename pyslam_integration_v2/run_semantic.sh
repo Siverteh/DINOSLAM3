@@ -7,7 +7,7 @@ DATA_PATH="${DATA_PATH:-$ROOT/../src/dino_slam3/data/tum_rgbd}"
 USE_XVFB="${USE_XVFB:-1}"
 MAX_DT="${MAX_DT:-0.02}"
 NFEATURES="${NFEATURES:-1000}"
-RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-60}"
+RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-600}"
 
 DEFAULT_CKPT="$ROOT/../runs/tum_stage1_dinov3_refine_v1/checkpoints/best.pt"
 CKPT="${CKPT:-$DEFAULT_CKPT}"

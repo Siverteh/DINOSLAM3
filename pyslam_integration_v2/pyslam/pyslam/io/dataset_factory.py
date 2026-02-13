@@ -59,7 +59,6 @@ from .dataset import (
     NeuralRGBDDataset,
     RoverDataset,
 )
-from .mcap_dataset import McapDataset
 
 
 from typing import TYPE_CHECKING
@@ -169,57 +168,11 @@ def dataset_factory(config: "Config") -> Dataset:
             path, name, sensor_type, associations, start_frame_id, DatasetType.LIVE
         )
     if type == "ros1bag":
-        from pyslam.io.ros1bag_dataset import Ros1bagDataset
-
-        fps = 10  # a default value
-        if "fps" in dataset_settings:
-            fps = int(dataset_settings["fps"])
-        dataset = Ros1bagDataset(
-            path,
-            name,
-            sensor_type,
-            associations,
-            start_frame_id,
-            DatasetType.ROS1BAG,
-            environment_type,
-            fps,
-            config,
-        )
+        raise ValueError("ros1bag dataset support has been pruned in pyslam_integration_v2.")
     if type == "ros2bag":
-        from pyslam.io.ros2bag_dataset import Ros2bagDataset
-
-        fps = 10  # fps default value
-        rate = 1.0  # rate multiplier default value
-        if "fps" in dataset_settings:
-            fps = int(dataset_settings["fps"])
-        if "rate" in dataset_settings:
-            rate = float(dataset_settings["rate"])
-        # dataset = Ros2bagDataset(path, name, sensor_type, associations, start_frame_id, DatasetType.ROS1BAG, environment_type, fps, rate, config)
-        dataset = Ros2bagDataset(
-            path,
-            name,
-            sensor_type,
-            associations,
-            start_frame_id,
-            DatasetType.ROS1BAG,
-            environment_type,
-            fps,
-            config,
-        )
+        raise ValueError("ros2bag dataset support has been pruned in pyslam_integration_v2.")
     if type == "mcap":
-        if "fps" in dataset_settings:
-            fps = int(dataset_settings["fps"])
-        dataset = McapDataset(
-            path,
-            name,
-            sensor_type,
-            associations,
-            start_frame_id,
-            DatasetType.MCAP,
-            environment_type,
-            fps=fps,
-            config=config,
-        )
+        raise ValueError("mcap dataset support has been pruned in pyslam_integration_v2.")
     if type == "scannet":
         dataset = ScannetDataset(
             path, name, sensor_type, associations, start_frame_id, DatasetType.SCANNET, config
