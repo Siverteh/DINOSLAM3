@@ -312,8 +312,8 @@ def _print_stats(s: SeqStats, inlier_px: float, pnp_px: float) -> None:
 @torch.no_grad()
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", type=str, required=True)
-    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--config", type=str, default="configs/eval/viz.yaml")
+    ap.add_argument("--ckpt", type=str, default="runs/tum_stage1_dinov3_refine_v1/checkpoints/best.pt")
 
     # either pass many --sequence, or use --all to read dataset.sequences from config
     ap.add_argument("--sequence", type=str, action="append", default=None,

@@ -18,3 +18,4 @@ tum_rgbd/
 .history
 *.log
 *.json
+*.dbow3
