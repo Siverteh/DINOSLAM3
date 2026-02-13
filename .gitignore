@@ -16,3 +16,5 @@ wandb/
 *.txt
 tum_rgbd/
 .history
+*.log
+*.json
