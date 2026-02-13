@@ -10,6 +10,7 @@ OUTPUT_PATH="$SCRIPT_DIR/results/baseline"
 GTSAM_LIB_DIR="$PYSLAM_DIR/thirdparty/gtsam_local/install/lib"
 EXECUTABLE="$PYTHON_BIN $PYSLAM_DIR/main_slam.py"
 ASSOC_SCRIPT="$SCRIPT_DIR/associate.py"
+RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-60}"
 
 PYTHON_CANDIDATES=(
     "/workspace/DINOSLAM3/.venv/bin/python"
@@ -145,9 +146,30 @@ EOF
     echo "Running pySLAM..."
     cd "$PYSLAM_DIR"
 
-    xvfb-run -a -s "-screen 0 640x480x24" \
-        $EXECUTABLE --config_path "$CONFIG_FILE" --headless --no_output_date \
-        2>&1 | tee "$LOG_FILE"
+    set +e
+    if [[ "$RUN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] && [[ "$RUN_TIMEOUT_SECONDS" -gt 0 ]]; then
+        timeout --signal=TERM --kill-after=5s "${RUN_TIMEOUT_SECONDS}s" xvfb-run -a -s "-screen 0 640x480x24" \
+            $EXECUTABLE --config_path "$CONFIG_FILE" --headless --no_output_date \
+            2>&1 | tee "$LOG_FILE"
+        RUN_RC=${PIPESTATUS[0]}
+    else
+        xvfb-run -a -s "-screen 0 640x480x24" \
+            $EXECUTABLE --config_path "$CONFIG_FILE" --headless --no_output_date \
+            2>&1 | tee "$LOG_FILE"
+        RUN_RC=${PIPESTATUS[0]}
+    fi
+    set -e
+
+    if [ "$RUN_RC" -eq 124 ]; then
+        echo "✗ Timed out after ${RUN_TIMEOUT_SECONDS}s for $SEQ"
+        rm -f "$CONFIG_FILE"
+        continue
+    fi
+    if [ "$RUN_RC" -ne 0 ]; then
+        echo "✗ pySLAM exited with code $RUN_RC for $SEQ"
+        rm -f "$CONFIG_FILE"
+        continue
+    fi
 
     TRAJ_GEN="$OUTPUT_PATH/${SEQ}_final.txt"
     TRAJ_ONLINE="$OUTPUT_PATH/${SEQ}_online.txt"
