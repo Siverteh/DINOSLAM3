@@ -31,13 +31,29 @@ def _device(cfg: Dict[str, Any]) -> torch.device:
 def _make_loaders(cfg: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     dcfg = cfg["dataset"]
     assoc = dcfg.get("association", {})
+    dataset_root = Path(dcfg["root"]).expanduser()
+    skip_missing = bool(dcfg.get("skip_missing_sequences", True))
+    sequence_repeat = dcfg.get("sequence_repeat", {})
+
+    def _repeat_count(seq_name: str) -> int:
+        try:
+            return max(1, int(sequence_repeat.get(seq_name, 1)))
+        except Exception:
+            return 1
 
     def build(seqs, is_train: bool):
         ds_list = []
         for s in seqs:
-            ds_list.append(
-                TUMRGBDDataset(
-                    dataset_root=dcfg["root"],
+            seq_dir = dataset_root / s
+            if not seq_dir.exists():
+                if skip_missing:
+                    print(f"[train] WARNING: skipping missing sequence: {seq_dir}")
+                    continue
+                raise FileNotFoundError(f"Sequence folder not found: {seq_dir}")
+
+            try:
+                ds = TUMRGBDDataset(
+                    dataset_root=dataset_root,
                     sequence=s,
                     frame_spacing_min=int(dcfg.get("frame_spacing_min", 1)),
                     frame_spacing_max=int(dcfg.get("frame_spacing_max", 4)),
@@ -48,6 +64,21 @@ def _make_loaders(cfg: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
                     max_rgb_depth_dt=float(assoc.get("max_rgb_depth_dt", 0.02)),
                     max_rgb_gt_dt=float(assoc.get("max_rgb_gt_dt", 0.02)),
                 )
+            except Exception as exc:
+                if skip_missing:
+                    print(f"[train] WARNING: skipping sequence {s}: {exc}")
+                    continue
+                raise
+
+            rep = _repeat_count(s) if is_train else 1
+            for _ in range(rep):
+                ds_list.append(ds)
+
+        if len(ds_list) == 0:
+            split = "train" if is_train else "val"
+            raise RuntimeError(
+                f"No valid sequences available for split='{split}'. "
+                "Check dataset.root, sequence names, and skip_missing_sequences."
             )
         return ConcatDataset(ds_list)
 
@@ -55,25 +86,27 @@ def _make_loaders(cfg: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     val_ds = build(dcfg["val_sequences"], False)
 
     tcfg = cfg["training"]
+    num_workers = int(tcfg.get("num_workers", 8))
+    common_loader_kwargs = dict(
+        batch_size=int(tcfg["batch_size"]),
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=(num_workers > 0),
+    )
+    if num_workers > 0:
+        common_loader_kwargs["prefetch_factor"] = int(tcfg.get("prefetch_factor", 4))
+
     train_loader = DataLoader(
         train_ds,
-        batch_size=int(tcfg["batch_size"]),
         shuffle=True,
-        num_workers=int(tcfg.get("num_workers", 8)),
-        pin_memory=True,
         drop_last=True,
-        persistent_workers=True,
-        prefetch_factor=4,
+        **common_loader_kwargs,
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=int(tcfg["batch_size"]),
         shuffle=False,
-        num_workers=int(tcfg.get("num_workers", 8)),
-        pin_memory=True,
         drop_last=False,
-        persistent_workers=True,
-        prefetch_factor=4,
+        **common_loader_kwargs,
     )
     return train_loader, val_loader
 
@@ -90,6 +123,41 @@ def _build_model(cfg: Dict[str, Any]) -> LocalFeatureNet:
         use_reliability=bool(m["heads"].get("reliability", {}).get("enabled", True)),
         dinov3_dtype=str(m["dinov3"].get("dtype", "bf16")),
     )
+
+
+def _load_checkpoint(path: str | Path) -> Dict[str, Any]:
+    ckpt_path = Path(path).expanduser()
+    if not ckpt_path.is_absolute():
+        ckpt_path = (Path.cwd() / ckpt_path).resolve()
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+    return torch.load(str(ckpt_path), map_location="cpu")
+
+
+def _extract_model_state(ckpt: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+    state = ckpt.get("model", ckpt)
+    if not isinstance(state, dict):
+        raise RuntimeError("Invalid checkpoint: could not find model state_dict")
+    return state
+
+
+def _load_model_weights(
+    model: torch.nn.Module,
+    ckpt_path: str | Path,
+    strict: bool = False,
+) -> Dict[str, Any]:
+    ckpt = _load_checkpoint(ckpt_path)
+    state = _extract_model_state(ckpt)
+    missing, unexpected = model.load_state_dict(state, strict=strict)
+    print(
+        f"[train] loaded model from {ckpt_path} "
+        f"(strict={strict}, missing={len(missing)}, unexpected={len(unexpected)})"
+    )
+    if missing:
+        print(f"[train] missing keys (first 10): {missing[:10]}")
+    if unexpected:
+        print(f"[train] unexpected keys (first 10): {unexpected[:10]}")
+    return ckpt
 
 @torch.no_grad()
 def _val_diagnostics(cfg: Dict[str, Any], batch: Dict[str, torch.Tensor], out1, out2) -> Dict[str, float]:
@@ -333,6 +401,10 @@ def _val_diagnostics(cfg: Dict[str, Any], batch: Dict[str, torch.Tensor], out1, 
 
 def train(cfg: Dict[str, Any]) -> None:
     device = _device(cfg)
+    tcfg = cfg["training"]
+    out_dir = ensure_dir(Path(cfg["run"]["out_dir"]) / cfg["run"]["name"])
+    ckpt_dir = ensure_dir(out_dir / "checkpoints")
+
     train_loader, val_loader = _make_loaders(cfg)
     model = _build_model(cfg).to(device)
 
@@ -341,24 +413,47 @@ def train(cfg: Dict[str, Any]) -> None:
         torch.backends.cudnn.allow_tf32 = True
         torch.set_float32_matmul_precision("high")
 
-    opt = AdamW([p for p in model.parameters() if p.requires_grad], lr=float(cfg["training"]["lr"]),
-                weight_decay=float(cfg["training"].get("weight_decay", 1e-4)))
+    opt = AdamW(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=float(tcfg["lr"]),
+        weight_decay=float(tcfg.get("weight_decay", 1e-4)),
+    )
 
-    epochs = int(cfg["training"]["epochs"])
-    sch = CosineAnnealingLR(opt, T_max=epochs, eta_min=float(cfg["training"].get("lr_min", 1e-6)))
+    epochs = int(tcfg["epochs"])
+    sch = CosineAnnealingLR(opt, T_max=epochs, eta_min=float(tcfg.get("lr_min", 1e-6)))
+    start_epoch = 1
 
-    out_dir = ensure_dir(Path(cfg["run"]["out_dir"]) / cfg["run"]["name"])
-    ckpt_dir = ensure_dir(out_dir / "checkpoints")
-
-    stride = int(cfg["model"].get("stride", 4))
-    use_amp = bool(cfg["training"].get("mixed_precision", True)) and device.type == "cuda"
-    amp_dtype = torch.bfloat16 if str(cfg["training"].get("amp_dtype", "bf16")).lower() in ("bf16", "bfloat16") else torch.float16
-    use_scaler = use_amp and (amp_dtype == torch.float16)
-    scaler = GradScaler("cuda", enabled=use_scaler)
+    init_ckpt = tcfg.get("init_checkpoint")
+    resume_ckpt = tcfg.get("resume_checkpoint")
+    init_strict = bool(tcfg.get("init_strict", False))
+    if init_ckpt and resume_ckpt:
+        raise ValueError("Use only one of training.init_checkpoint or training.resume_checkpoint.")
 
     best_val = float("inf")
+    if resume_ckpt:
+        ckpt = _load_model_weights(model, resume_ckpt, strict=init_strict)
+        if "optimizer" in ckpt and ckpt["optimizer"] is not None:
+            opt.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt and ckpt["scheduler"] is not None:
+            sch.load_state_dict(ckpt["scheduler"])
+        else:
+            done_epochs = int(ckpt.get("epoch", 0))
+            for _ in range(done_epochs):
+                sch.step()
+        start_epoch = int(ckpt.get("epoch", 0)) + 1
+        best_val = float(ckpt.get("best_val_loss", best_val))
+        print(f"[train] resuming from epoch {start_epoch}")
+    elif init_ckpt:
+        _load_model_weights(model, init_ckpt, strict=init_strict)
 
-    for epoch in range(1, epochs + 1):
+    stride = int(cfg["model"].get("stride", 4))
+    use_amp = bool(tcfg.get("mixed_precision", True)) and device.type == "cuda"
+    amp_dtype = torch.bfloat16 if str(tcfg.get("amp_dtype", "bf16")).lower() in ("bf16", "bfloat16") else torch.float16
+    use_scaler = use_amp and (amp_dtype == torch.float16)
+    scaler = GradScaler("cuda", enabled=use_scaler)
+    grad_clip_norm = float(tcfg.get("grad_clip_norm", 0.0) or 0.0)
+
+    for epoch in range(start_epoch, epochs + 1):
         lr = opt.param_groups[0]["lr"]
         print_epoch_header(epoch, epochs, lr)
 
@@ -384,10 +479,15 @@ def train(cfg: Dict[str, Any]) -> None:
 
             if use_scaler:
                 scaler.scale(loss).backward()
+                if grad_clip_norm > 0:
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 scaler.step(opt)
                 scaler.update()
             else:
                 loss.backward()
+                if grad_clip_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 opt.step()
 
             bs = batch["rgb1"].shape[0]
@@ -459,13 +559,33 @@ def train(cfg: Dict[str, Any]) -> None:
         sch.step()
 
         # save
-        if bool(cfg["training"].get("save_every_epoch", True)):
+        if bool(tcfg.get("save_every_epoch", True)):
             ckpt_path = ckpt_dir / f"epoch_{epoch:03d}.pt"
-            torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": opt.state_dict(), "config": cfg}, ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model": model.state_dict(),
+                    "optimizer": opt.state_dict(),
+                    "scheduler": sch.state_dict(),
+                    "best_val_loss": float(best_val),
+                    "config": cfg,
+                },
+                ckpt_path,
+            )
             print_save_notice(str(ckpt_path), "epoch")
 
         if val_m["loss_total"] < best_val:
             best_val = val_m["loss_total"]
             best_path = ckpt_dir / "best.pt"
-            torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": opt.state_dict(), "config": cfg}, best_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model": model.state_dict(),
+                    "optimizer": opt.state_dict(),
+                    "scheduler": sch.state_dict(),
+                    "best_val_loss": float(best_val),
+                    "config": cfg,
+                },
+                best_path,
+            )
             print_save_notice(str(best_path), f"new best val loss_total={best_val:.4f}")

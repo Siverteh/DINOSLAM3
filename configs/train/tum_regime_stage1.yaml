@@ -1,0 +1,91 @@
+base: base.yaml
+
+run:
+  name: tum_regime_stage1_semantic_v1
+
+model:
+  heads:
+    # Stage 1 focuses on robust detector/descriptor learning first.
+    reliability:
+      enabled: false
+
+dataset:
+  skip_missing_sequences: true
+  frame_spacing_min: 1
+  frame_spacing_max: 4
+
+  # Bias training toward low-texture / office-like sequences.
+  sequence_repeat:
+    rgbd_dataset_freiburg1_desk: 2
+    rgbd_dataset_freiburg1_plant: 3
+    rgbd_dataset_freiburg1_room: 2
+    rgbd_dataset_freiburg3_long_office_household: 2
+
+  train_sequences:
+    - rgbd_dataset_freiburg1_xyz
+    - rgbd_dataset_freiburg1_rpy
+    - rgbd_dataset_freiburg1_floor
+    - rgbd_dataset_freiburg1_desk
+    - rgbd_dataset_freiburg1_desk2
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg1_360
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_teddy
+    - rgbd_dataset_freiburg2_xyz
+    - rgbd_dataset_freiburg2_rpy
+    - rgbd_dataset_freiburg2_360_hemisphere
+    - rgbd_dataset_freiburg2_desk
+    - rgbd_dataset_freiburg2_dishes
+    - rgbd_dataset_freiburg2_flowerbouquet
+    - rgbd_dataset_freiburg2_coke
+    - rgbd_dataset_freiburg3_long_office_household
+    - rgbd_dataset_freiburg3_structure_texture_near
+    - rgbd_dataset_freiburg3_structure_texture_far
+    - rgbd_dataset_freiburg3_walking_xyz
+    - rgbd_dataset_freiburg3_sitting_xyz
+    - rgbd_dataset_freiburg3_walking_rpy
+    - rgbd_dataset_freiburg3_sitting_rpy
+    - rgbd_dataset_freiburg3_cabinet
+    - rgbd_dataset_freiburg3_large_cabinet
+
+  # Validate directly on target benchmark-like sequences.
+  val_sequences:
+    - rgbd_dataset_freiburg1_desk
+    - rgbd_dataset_freiburg1_plant
+    - rgbd_dataset_freiburg1_room
+    - rgbd_dataset_freiburg3_long_office_household
+
+training:
+  epochs: 24
+  batch_size: 12
+  num_workers: 12
+  prefetch_factor: 4
+  lr: 2.0e-4
+  lr_min: 2.0e-6
+  grad_clip_norm: 1.0
+
+loss:
+  geom:
+    sample_points: 1536
+    border: 8
+    depth_consistency_m: 0.05
+
+  contrastive:
+    temperature: 0.06
+    max_positives: 768
+    weight: 1.0
+
+  detector:
+    weight: 0.75
+    sparsity_weight: 0.08
+    alpha: 0.25
+    gamma: 2.0
+    target_mean: 0.015
+
+  offset:
+    weight: 0.35
+
+  reliability:
+    weight: 0.0
+    mode: none
+    target_mean: 0.10

@@ -231,6 +231,9 @@ def compute_losses(
     w_refine = float(_pick(offset_cfg, "weight", "w_refine", 0.2))
     w_rel = float(_pick(rel_cfg, "weight", "w_reliability", 0.05))
     rel_target = float(_pick(rel_cfg, "target_mean", None, 0.1))
+    rel_mode = str(_pick(rel_cfg, "mode", None, "cosine")).lower()
+    rel_pos_weight = float(_pick(rel_cfg, "pos_weight", None, 2.0))
+    rel_mean_reg_weight = float(_pick(rel_cfg, "mean_reg_weight", None, 0.1))
 
     # ---------------- geometry correspondences ----------------
     xy1 = stratified_sample(valid1, N, border=border)  # (B,N,2)
@@ -341,11 +344,37 @@ def compute_losses(
         else:
             loss_refine = loss_refine_1
 
-    # ---------------- reliability regularizer ----------------
+    # ---------------- reliability / uncertainty ----------------
     loss_rel = torch.tensor(0.0, device=device)
     if getattr(out1, "reliability", None) is not None and out1.reliability is not None:
         r_mean = torch.sigmoid(out1.reliability.float()).mean()
-        loss_rel = (r_mean - rel_target).abs()
+        mean_reg = (r_mean - rel_target).abs()
+
+        if rel_mode in {"none", "off"}:
+            loss_rel = mean_reg
+        else:
+            rel_logits = grid_sample_1c(out1.reliability, xy1_f)
+            with torch.no_grad():
+                d1_rel = grid_sample_desc(out1.desc.detach(), xy1_f)
+                d2_rel = grid_sample_desc(out2.desc.detach(), xy2_f)
+                d1_rel = F.normalize(d1_rel, dim=-1, eps=1e-6)
+                d2_rel = F.normalize(d2_rel, dim=-1, eps=1e-6)
+                cos_sim = (d1_rel * d2_rel).sum(dim=-1)  # (B,N), in [-1,1]
+                rel_target_map = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0)
+                rel_target_map = rel_target_map * m
+                rel_weights = torch.where(
+                    rel_target_map > 0.5,
+                    torch.full_like(rel_target_map, rel_pos_weight),
+                    torch.ones_like(rel_target_map),
+                )
+
+            rel_bce = F.binary_cross_entropy_with_logits(
+                rel_logits,
+                rel_target_map,
+                weight=rel_weights,
+                reduction="mean",
+            )
+            loss_rel = rel_bce + rel_mean_reg_weight * mean_reg
 
     # ---------------- pose loss placeholder (0) ----------------
     # (You can add pose supervision later if desired.)

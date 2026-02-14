@@ -49,7 +49,20 @@ python -m dino_slam3.scripts.train --config configs/train/tum_stage1.yaml
 
 Stage 2: optional fine-tuning with harder negatives / longer baselines
 ```bash
-python -m dino_slam3.scripts.train --config configs/train/tum_stage2.yaml
+python -m dino_slam3.scripts.train --config configs/train/tum_stage2.yaml --init-ckpt runs/tum_stage1_dinov3_refine_v1/checkpoints/best.pt
+```
+
+Coverage-first regime (recommended for pySLAM trajectory robustness):
+```bash
+./scripts/train_regime.sh
+```
+This runs:
+1) `configs/train/tum_regime_stage1.yaml`
+2) `configs/train/tum_regime_stage2.yaml` initialized from stage1 `best.pt`
+
+Resume support is also available:
+```bash
+python -m dino_slam3.scripts.train --config <config.yaml> --resume-ckpt runs/<run_name>/checkpoints/epoch_00X.pt
 ```
 
 ### 5) Visualize matches
