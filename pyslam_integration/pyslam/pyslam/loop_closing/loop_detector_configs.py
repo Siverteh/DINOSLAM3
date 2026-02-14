@@ -35,7 +35,10 @@ from pyslam.slam.feature_tracker_shared import SlamFeatureManagerInfo
 
 from .loop_detector_base import LoopDetectorBase
 from .loop_detector_dbow3 import LoopDetectorDBoW3
-from .loop_detector_dbow2 import LoopDetectorDBoW2
+try:
+    from .loop_detector_dbow2 import LoopDetectorDBoW2
+except Exception:
+    LoopDetectorDBoW2 = None
 try:
     from .loop_detector_obindex2 import LoopDetectorOBIndex2
 except Exception:
@@ -316,6 +319,11 @@ def loop_detector_factory(
 
     loop_detector = None
     if global_descriptor_type == GlobalDescriptorType.DBOW2:
+        if LoopDetectorDBoW2 is None:
+            raise RuntimeError(
+                "DBOW2 loop detector selected, but DBOW2 backend is unavailable. "
+                "Install pydbow2/libDBoW2 or use DBOW3_INDEPENDENT."
+            )
         if local_feature_manager is not None:
             if (
                 local_feature_manager.descriptor_type != FeatureDescriptorTypes.ORB2

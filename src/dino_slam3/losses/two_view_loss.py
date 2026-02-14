@@ -202,23 +202,35 @@ def compute_losses(
     offset_cfg = cfg.get("offset", {})
     rel_cfg = cfg.get("reliability", {})
 
-    N = int(geom.get("sample_points", 1024))
-    border = int(geom.get("border", 8))
-    depth_cons_m = float(geom.get("depth_consistency_m", 0.05))
+    def _pick(
+        nested: Dict[str, Any],
+        nested_key: str,
+        legacy_key: Optional[str],
+        default: Any,
+    ) -> Any:
+        if nested_key in nested:
+            return nested[nested_key]
+        if legacy_key is not None and legacy_key in cfg:
+            return cfg[legacy_key]
+        return default
 
-    temperature = float(contrastive.get("temperature", 0.07))
-    max_pos = int(contrastive.get("max_positives", 512))
-    w_desc = float(contrastive.get("weight", 1.0))
+    N = int(_pick(geom, "sample_points", "sample_points", 1024))
+    border = int(_pick(geom, "border", "border", 8))
+    depth_cons_m = float(_pick(geom, "depth_consistency_m", "depth_consistency_m", 0.05))
 
-    w_repeat = float(detector.get("weight", 1.0))
-    w_sparse = float(detector.get("sparsity_weight", 0.2))
-    det_alpha = float(detector.get("alpha", 0.25))
-    det_gamma = float(detector.get("gamma", 2.0))
-    target_mean = float(detector.get("target_mean", 0.01))
+    temperature = float(_pick(contrastive, "temperature", "temperature", 0.07))
+    max_pos = int(_pick(contrastive, "max_positives", None, contrastive.get("num_negatives", 512)))
+    w_desc = float(_pick(contrastive, "weight", "w_desc", 1.0))
 
-    w_refine = float(offset_cfg.get("weight", 0.2))
-    w_rel = float(rel_cfg.get("weight", 0.05))
-    rel_target = float(rel_cfg.get("target_mean", 0.1))
+    w_repeat = float(_pick(detector, "weight", "w_repeat", 1.0))
+    w_sparse = float(_pick(detector, "sparsity_weight", "w_sparsity", 0.2))
+    det_alpha = float(_pick(detector, "alpha", None, 0.25))
+    det_gamma = float(_pick(detector, "gamma", None, 2.0))
+    target_mean = float(_pick(detector, "target_mean", None, 0.01))
+
+    w_refine = float(_pick(offset_cfg, "weight", "w_refine", 0.2))
+    w_rel = float(_pick(rel_cfg, "weight", "w_reliability", 0.05))
+    rel_target = float(_pick(rel_cfg, "target_mean", None, 0.1))
 
     # ---------------- geometry correspondences ----------------
     xy1 = stratified_sample(valid1, N, border=border)  # (B,N,2)

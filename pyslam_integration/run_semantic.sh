@@ -5,12 +5,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_PATH="${DATA_PATH:-$ROOT/../src/dino_slam3/data/tum_rgbd}"
 USE_XVFB="${USE_XVFB:-1}"
 MAX_DT="${MAX_DT:-0.02}"
-NFEATURES="${NFEATURES:-2000}"
+NFEATURES="${NFEATURES:-1200}"
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-600}"
 USE_LOOP_CLOSING="${USE_LOOP_CLOSING:-1}"
 LOOP_DETECTION_CONFIG_NAME="${LOOP_DETECTION_CONFIG_NAME:-DBOW3_INDEPENDENT}"
 MISSING_PENALTY_METERS="${MISSING_PENALTY_METERS:-1.0}"
 MIN_COVERAGE_OK="${MIN_COVERAGE_OK:-0.95}"
+PYSLAM_USE_CPP_CORE="${PYSLAM_USE_CPP_CORE:-0}"
+DINOSLAM3_KP_TILE_SIZE="${DINOSLAM3_KP_TILE_SIZE:-8}"
+DINOSLAM3_KP_PER_TILE="${DINOSLAM3_KP_PER_TILE:-4}"
+DINOSLAM3_KP_NMS_RADIUS="${DINOSLAM3_KP_NMS_RADIUS:-6}"
 
 DEFAULT_CKPT="$ROOT/../runs/tum_stage1_dinov3_refine_v1/checkpoints/best.pt"
 CKPT="${CKPT:-$DEFAULT_CKPT}"
@@ -99,6 +103,10 @@ export CKPT
 export DINOSLAM3_CKPT="$CKPT"
 DINOSLAM3_ROOT="${DINOSLAM3_ROOT:-$(realpath "$ROOT/..")}"
 export DINOSLAM3_ROOT
+export DINOSLAM3_KP_TILE_SIZE
+export DINOSLAM3_KP_PER_TILE
+export DINOSLAM3_KP_NMS_RADIUS
+export PYSLAM_USE_CPP_CORE
 export PYTHONPATH="$DINOSLAM3_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 RESULTS_DIR="$ROOT/results/semantic"
@@ -114,8 +122,13 @@ echo "semantic python: $PYTHON_BIN"
 echo "semantic checkpoint: $CKPT"
 echo "semantic DINOSLAM3_ROOT: $DINOSLAM3_ROOT"
 echo "semantic data path: $DATA_PATH"
+echo "semantic nfeatures: $NFEATURES"
+echo "semantic kp tile-size: $DINOSLAM3_KP_TILE_SIZE"
+echo "semantic kp per-tile: $DINOSLAM3_KP_PER_TILE"
+echo "semantic kp nms-radius: $DINOSLAM3_KP_NMS_RADIUS"
 echo "semantic missing-penalty-m: $MISSING_PENALTY_METERS"
 echo "semantic min-coverage-ok: $MIN_COVERAGE_OK"
+echo "semantic pyslam-use-cpp-core: $PYSLAM_USE_CPP_CORE"
 
 TARGET_SEQUENCES=(
   "freiburg1_desk"

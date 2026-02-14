@@ -19,3 +19,6 @@ tum_rgbd/
 *.log
 *.json
 *.dbow3
+*.csv
+tmp/
+tmp

@@ -1,8 +1,12 @@
 # Stage 2: same pipeline, harder negatives + longer spacing
-base: configs/train/tum_stage1.yaml
+base: tum_stage1.yaml
+
+run:
+  name: tum_stage2_dinov3_harder_pairs_v1
 
 dataset:
-  frame_spacing: 2
+  frame_spacing_min: 2
+  frame_spacing_max: 6
 
 training:
   epochs: 10
@@ -10,6 +14,6 @@ training:
 
 loss:
   contrastive:
-    num_negatives: 512
-  repeatability:
+    max_positives: 768
+  detector:
     weight: 0.7

@@ -72,22 +72,29 @@ training:
   save_every_epoch: true
 
 loss:
-  temperature: 0.07
+  geom:
+    sample_points: 1024
+    border: 8
+    depth_consistency_m: 0.05
 
-  match_radius_px: 4.0
-  depth_consistency_m: 0.05
+  contrastive:
+    temperature: 0.07
+    max_positives: 512
+    weight: 1.0
+
+  detector:
+    weight: 0.50
+    sparsity_weight: 0.10
+    alpha: 0.25
+    gamma: 2.0
+    target_mean: 0.01
+
+  offset:
+    weight: 0.50
+
+  reliability:
+    weight: 0.50
+    target_mean: 0.10
+
+  # Used by trainer diagnostics / eval scripts.
   z_min_m: 0.10
-
-  w_desc: 1.0
-  w_repeat: 0.50
-  w_reliability: 0.50
-  w_sparsity: 0.10
-  w_refine: 0.50
-  refine_window: 5
-
-  pose:
-    enabled: true
-    warmup_epochs: 3
-    w_pose: 0.10
-    w_rot: 1.0
-    w_trans: 1.0

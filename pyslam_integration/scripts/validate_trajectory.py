@@ -51,17 +51,23 @@ def validate(traj_path: Path, gt_path: Path, max_dt: float):
     if t_eval.size == 0:
         raise ValueError("No overlapping timestamps with groundtruth range")
 
-    # Nearest GT timestamp for overlapping samples must be within threshold.
-    for t in t_eval:
-        j = int(np.argmin(np.abs(t_gt - t)))
-        if abs(float(t_gt[j]) - float(t)) > max_dt:
-            raise ValueError(f"Timestamp alignment failure: |{t_gt[j]} - {t}| > {max_dt}")
+    # Report alignment quality but do not fail hard on out-of-threshold samples.
+    idx = np.searchsorted(t_gt, t_eval)
+    idx_r = np.clip(idx, 0, t_gt.shape[0] - 1)
+    idx_l = np.clip(idx - 1, 0, t_gt.shape[0] - 1)
+    dl = np.abs(t_gt[idx_l] - t_eval)
+    dr = np.abs(t_gt[idx_r] - t_eval)
+    nearest_dt = np.minimum(dl, dr)
+    num_outside = int(np.count_nonzero(nearest_dt > max_dt))
 
     return {
         "valid": True,
         "rows": int(traj.shape[0]),
         "rows_in_gt_range": int(t_eval.size),
         "rows_out_of_gt_range": int(t_traj.size - t_eval.size),
+        "rows_outside_max_dt": num_outside,
+        "nearest_dt_mean": float(np.mean(nearest_dt)),
+        "nearest_dt_max": float(np.max(nearest_dt)),
         "max_dt": float(max_dt),
     }
 

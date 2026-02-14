@@ -28,13 +28,27 @@ kScriptFolder = os.path.dirname(kScriptPath)
 kRootFolder = os.path.join(kScriptFolder, "..")
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 # List of shared static parameters for configuring SLAM modules
 class Parameters:
 
     # ================================================================
     # C++ core
     # ================================================================
-    USE_CPP_CORE = True  # True: use the C++ core; False: use the Python core
+    USE_CPP_CORE = _env_bool(
+        "PYSLAM_USE_CPP_CORE", True
+    )  # True: use the C++ core; False: use the Python core
 
     # ================================================================
     # Logs
