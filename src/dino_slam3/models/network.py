@@ -50,8 +50,7 @@ class LocalFeatureNet(nn.Module):
         fine = self.fine(x)  # (B,Cf,H/4,W/4)
 
         # DINO tokens at stride 16, then upsample to stride 4
-        with torch.autocast("cuda", enabled=False):
-            dino = self.backbone(x).tokens
+        dino = self.backbone(x).tokens
         dino_up = F.interpolate(dino, size=fine.shape[-2:], mode="bilinear", align_corners=False)
         dino_up = dino_up.to(dtype=fine.dtype)
 

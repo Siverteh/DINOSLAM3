@@ -150,6 +150,7 @@ def main():
 
     det = mcfg["heads"]["detector"]
     stride = int(mcfg.get("stride", 4))
+    use_rel_score = bool(cfg.get("inference", {}).get("use_reliability_in_score", False))
 
     k1 = extract_keypoints_torch(
         out1.heatmap, out1.desc, out1.offset, out1.reliability,
@@ -159,6 +160,7 @@ def main():
         k_per_tile=int(det.get("k_per_tile", 8)),
         max_keypoints=int(det.get("max_keypoints", 1024)),
         valid_mask_img=batch.get("valid_depth1", None),
+        use_reliability_in_score=use_rel_score,
     )
     k2 = extract_keypoints_torch(
         out2.heatmap, out2.desc, out2.offset, out2.reliability,
@@ -168,6 +170,7 @@ def main():
         k_per_tile=int(det.get("k_per_tile", 8)),
         max_keypoints=int(det.get("max_keypoints", 1024)),
         valid_mask_img=batch.get("valid_depth2", None),
+        use_reliability_in_score=use_rel_score,
     )
 
     d1 = k1.desc[0]

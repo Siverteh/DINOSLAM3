@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -116,6 +117,9 @@ def _extract_time_from_rgb_depth_item(item):
     return float(item)
 
 class TUMRGBDDataset(Dataset):
+    _GLOBAL_RGB_CACHE: Dict[str, np.ndarray] = {}
+    _GLOBAL_DEPTH_CACHE: Dict[str, np.ndarray] = {}
+
     def __init__(
         self,
         dataset_root: str | Path,
@@ -129,6 +133,11 @@ class TUMRGBDDataset(Dataset):
         max_rgb_depth_dt: float = 0.02,
         max_rgb_gt_dt: float = 0.02,
         depth_scale: float = 5000.0,
+        cache_in_memory: bool = False,
+        cache_to_disk: bool = False,
+        cache_dir: str | Path | None = None,
+        pair_sampler: Optional[Dict[str, Any]] = None,
+        total_epochs: int = 1,
     ):
         self.dataset_root = Path(dataset_root).expanduser()
         try:
@@ -147,6 +156,12 @@ class TUMRGBDDataset(Dataset):
         self.max_frames = None if max_frames is None else int(max_frames)
         self.pad_to = int(pad_to)
         self.depth_scale = float(depth_scale)
+        self.cache_in_memory = bool(cache_in_memory)
+        self.cache_to_disk = bool(cache_to_disk)
+        self.cache_dir = Path(cache_dir).expanduser() if cache_dir is not None else None
+        self.pair_sampler = dict(pair_sampler or {})
+        self.total_epochs = max(1, int(total_epochs))
+        self.current_epoch = 1
 
         self.max_rgb_depth_dt = float(max_rgb_depth_dt)
         self.max_rgb_gt_dt = float(max_rgb_gt_dt)
@@ -230,28 +245,124 @@ class TUMRGBDDataset(Dataset):
 
         self.frames = frames
         self.intr = tum_intrinsics_for_sequence(sequence)
+        self._rgb_cache: Dict[str, np.ndarray] = {}
+        self._depth_cache: Dict[str, np.ndarray] = {}
+        if self.cache_to_disk and self.cache_dir is None:
+            self.cache_dir = self.sequence_dir / ".dinoslam_cache"
+        if self.cache_to_disk and self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.cache_in_memory:
+            self._build_memory_cache()
 
     def __len__(self) -> int:
-        # Important: for train, delta can be up to frame_spacing_max
-        max_delta = self.frame_spacing_max if self.is_train else self.frame_spacing_min
+        max_delta = self.frame_spacing_max if self.is_train else self.frame_spacing_max
+        if self.is_train and self.pair_sampler:
+            ranges = []
+            for key in ("short_range", "medium_range", "hard_range"):
+                r = self.pair_sampler.get(key)
+                if isinstance(r, (list, tuple)) and len(r) == 2:
+                    lo, hi = int(r[0]), int(r[1])
+                    if hi >= lo >= 1:
+                        ranges.append((lo, hi))
+            if ranges:
+                max_delta = max(max_delta, max(hi for _, hi in ranges))
         return max(0, len(self.frames) - max_delta)
 
-    def _read_rgb(self, path: str) -> torch.Tensor:
+    def set_epoch(self, epoch: int, total_epochs: Optional[int] = None) -> None:
+        self.current_epoch = max(1, int(epoch))
+        if total_epochs is not None:
+            self.total_epochs = max(1, int(total_epochs))
+
+    def _read_rgb_np(self, path: str) -> np.ndarray:
         bgr = cv2.imread(path, cv2.IMREAD_COLOR)
         if bgr is None:
             raise FileNotFoundError(path)
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    def _read_rgb(self, path: str) -> torch.Tensor:
+        rgb = self._rgb_cache.get(path)
+        if rgb is None:
+            rgb = self._GLOBAL_RGB_CACHE.get(path)
+        if rgb is None:
+            rgb = self._read_rgb_np(path)
+            if self.cache_to_disk:
+                self._save_disk_cache(path, rgb, kind="rgb")
         x = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
         return x
 
-    def _read_depth(self, path: str) -> torch.Tensor:
+    def _read_depth_np(self, path: str) -> np.ndarray:
         d = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if d is None:
             raise FileNotFoundError(path)
         if d.dtype != np.uint16:
             d = d.astype(np.uint16)
+        return d
+
+    def _read_depth(self, path: str) -> torch.Tensor:
+        d = self._depth_cache.get(path)
+        if d is None:
+            d = self._GLOBAL_DEPTH_CACHE.get(path)
+        if d is None:
+            d = self._read_depth_np(path)
+            if self.cache_to_disk:
+                self._save_disk_cache(path, d, kind="depth")
         z = torch.from_numpy(d).float() / self.depth_scale
         return z.unsqueeze(0)
+
+    def _cache_file(self, path: str, kind: str) -> Optional[Path]:
+        if not self.cache_to_disk or self.cache_dir is None:
+            return None
+        key = hashlib.sha1(path.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{kind}_{key}.npy"
+
+    def _load_disk_cache(self, path: str, kind: str) -> Optional[np.ndarray]:
+        cp = self._cache_file(path, kind)
+        if cp is None or not cp.exists():
+            return None
+        try:
+            return np.load(cp, allow_pickle=False)
+        except Exception:
+            return None
+
+    def _save_disk_cache(self, path: str, arr: np.ndarray, kind: str) -> None:
+        cp = self._cache_file(path, kind)
+        if cp is None:
+            return
+        if cp.exists():
+            return
+        try:
+            np.save(cp, arr, allow_pickle=False)
+        except Exception:
+            pass
+
+    def _build_memory_cache(self) -> None:
+        rgb_paths = sorted({f["rgb"] for f in self.frames})
+        depth_paths = sorted({f["depth"] for f in self.frames})
+        print(
+            f"[dataset:{self.sequence}] caching {len(rgb_paths)} RGB + {len(depth_paths)} depth frames in RAM..."
+        )
+        for p in rgb_paths:
+            rgb = self._GLOBAL_RGB_CACHE.get(p)
+            if rgb is None:
+                rgb = self._load_disk_cache(p, kind="rgb")
+            if rgb is None:
+                rgb = self._read_rgb_np(p)
+                if self.cache_to_disk:
+                    self._save_disk_cache(p, rgb, kind="rgb")
+            self._rgb_cache[p] = rgb
+            self._GLOBAL_RGB_CACHE[p] = rgb
+        for p in depth_paths:
+            d = self._GLOBAL_DEPTH_CACHE.get(p)
+            if d is None:
+                d = self._load_disk_cache(p, kind="depth")
+            if d is None:
+                d = self._read_depth_np(p)
+                if self.cache_to_disk:
+                    self._save_disk_cache(p, d, kind="depth")
+            self._depth_cache[p] = d
+            self._GLOBAL_DEPTH_CACHE[p] = d
+        print(f"[dataset:{self.sequence}] cache ready")
 
     def _pad(self, x: torch.Tensor) -> torch.Tensor:
         _, H, W = x.shape
@@ -283,10 +394,47 @@ class TUMRGBDDataset(Dataset):
         return x
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        if self.is_train:
+        def _clip_delta(v: int) -> int:
+            return max(self.frame_spacing_min, min(self.frame_spacing_max, int(v)))
+
+        if self.is_train and self.pair_sampler:
+            ranges: List[Tuple[int, int]] = []
+            for key in ("short_range", "medium_range", "hard_range"):
+                r = self.pair_sampler.get(key)
+                if isinstance(r, (list, tuple)) and len(r) == 2:
+                    lo, hi = int(r[0]), int(r[1])
+                    if hi >= lo >= 1:
+                        ranges.append((lo, hi))
+            if len(ranges) == 3:
+                probs = self.pair_sampler.get("probs", [0.7, 0.2, 0.1])
+                schedule = self.pair_sampler.get("schedule", {})
+                if isinstance(schedule, dict):
+                    p0 = schedule.get("start")
+                    p1 = schedule.get("end")
+                    if isinstance(p0, (list, tuple)) and isinstance(p1, (list, tuple)) and len(p0) == 3 and len(p1) == 3:
+                        t = 0.0 if self.total_epochs <= 1 else float(self.current_epoch - 1) / float(self.total_epochs - 1)
+                        probs = [(1.0 - t) * float(p0[i]) + t * float(p1[i]) for i in range(3)]
+
+                probs = np.asarray(probs, dtype=np.float64)
+                if probs.shape[0] != 3 or np.any(probs < 0):
+                    probs = np.asarray([0.7, 0.2, 0.1], dtype=np.float64)
+                s = float(probs.sum())
+                probs = probs / s if s > 0 else np.asarray([0.7, 0.2, 0.1], dtype=np.float64)
+
+                b = int(np.random.choice(3, p=probs))
+                lo, hi = ranges[b]
+                delta = random.randint(max(1, lo), max(1, hi))
+                delta = _clip_delta(delta)
+            else:
+                delta = random.randint(self.frame_spacing_min, self.frame_spacing_max)
+        elif self.is_train:
             delta = random.randint(self.frame_spacing_min, self.frame_spacing_max)
         else:
-            delta = self.frame_spacing_min
+            if self.frame_spacing_max > self.frame_spacing_min:
+                width = self.frame_spacing_max - self.frame_spacing_min + 1
+                delta = self.frame_spacing_min + (int(idx) % width)
+            else:
+                delta = self.frame_spacing_min
 
         f1 = self.frames[idx]
         f2 = self.frames[idx + delta]

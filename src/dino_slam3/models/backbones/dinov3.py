@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 import os
+from contextlib import nullcontext
 
 import torch
 import torch.nn as nn
@@ -19,10 +20,9 @@ class DinoV3Backbone(nn.Module):
     DINOv3 backbone via HuggingFace Transformers.
     Returns patch tokens reshaped to (B, C, H/ps, W/ps).
 
-    H100 FIX (bulletproof):
-      - Run backbone in pure FP32 with autocast disabled.
-      - This avoids cublasGemmEx fp16/bf16 INVALID_VALUE issues seen on some H100 stacks.
-      - Keep AMP for the rest of your network (heads) outside this backbone.
+    Compute precision is controlled via `dtype`:
+      - bf16 / fp16: run with CUDA autocast for maximum throughput.
+      - fp32: disable autocast for maximum compatibility.
     """
 
     def __init__(
@@ -30,7 +30,7 @@ class DinoV3Backbone(nn.Module):
         name_or_path: str,
         patch_size: int = 16,
         freeze: bool = True,
-        dtype: str = "fp32",  # ignored on CUDA: we force fp32
+        dtype: str = "bf16",
     ):
         super().__init__()
         self.name_or_path = str(name_or_path)
@@ -42,6 +42,14 @@ class DinoV3Backbone(nn.Module):
         self.embed_dim: Optional[int] = None
         self.num_register_tokens: int = 0
         self._loaded: bool = False
+        self._runtime_force_fp32: bool = False
+
+    def _compute_dtype(self) -> torch.dtype:
+        if self.dtype_name in {"bf16", "bfloat16"}:
+            return torch.bfloat16
+        if self.dtype_name in {"fp16", "float16", "half"}:
+            return torch.float16
+        return torch.float32
 
     def load(self) -> None:
         requested_name = os.environ.get("DINOSLAM3_DINOV3_NAME_OR_PATH", self.name_or_path)
@@ -130,13 +138,11 @@ class DinoV3Backbone(nn.Module):
 
         self._loaded = True
 
-    def _ensure_on_device_fp32(self, device: torch.device) -> None:
+    def _ensure_on_device(self, device: torch.device) -> None:
         assert self.model is not None
         cur_dev = next(self.model.parameters()).device
-        cur_dtype = next(self.model.parameters()).dtype
-
-        if cur_dev != device or cur_dtype != torch.float32:
-            self.model.to(device=device, dtype=torch.float32)
+        if cur_dev != device:
+            self.model.to(device=device)
             self.model.eval()
             if self.freeze:
                 for p in self.model.parameters():
@@ -154,12 +160,26 @@ class DinoV3Backbone(nn.Module):
         if (H % ps) != 0 or (W % ps) != 0:
             raise ValueError(f"Input must be padded to patch size {ps}. Got H={H}, W={W}")
 
-        # Force backbone to FP32 on whatever device x is on
-        self._ensure_on_device_fp32(x.device)
+        self._ensure_on_device(x.device)
 
-        # Run backbone with autocast OFF (pure fp32)
-        with torch.autocast(device_type="cuda", enabled=False):
-            out = self.model(pixel_values=x.float(), return_dict=True)
+        compute_dtype = torch.float32 if self._runtime_force_fp32 else self._compute_dtype()
+        use_cuda_amp = x.is_cuda and compute_dtype != torch.float32
+        amp_ctx = (
+            torch.autocast(device_type="cuda", enabled=True, dtype=compute_dtype)
+            if use_cuda_amp
+            else (torch.autocast(device_type="cuda", enabled=False) if x.is_cuda else nullcontext())
+        )
+        try:
+            with amp_ctx:
+                out = self.model(pixel_values=x if use_cuda_amp else x.float(), return_dict=True)
+        except RuntimeError as exc:
+            if use_cuda_amp and "CUBLAS_STATUS_INVALID_VALUE" in str(exc):
+                self._runtime_force_fp32 = True
+                print("[DinoV3Backbone] WARNING: bf16/fp16 GEMM failed on this stack; falling back to fp32 backbone.")
+                with (torch.autocast(device_type="cuda", enabled=False) if x.is_cuda else nullcontext()):
+                    out = self.model(pixel_values=x.float(), return_dict=True)
+            else:
+                raise
 
         tokens = out.last_hidden_state  # (B, seq, C)
 

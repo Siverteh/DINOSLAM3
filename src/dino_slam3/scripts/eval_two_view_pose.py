@@ -51,6 +51,7 @@ def main():
 
     det = cfg["model"]["heads"]["detector"]
     stride = int(cfg["model"].get("stride", 4))
+    use_rel_score = bool(cfg.get("inference", {}).get("use_reliability_in_score", False))
 
     inlier_rates = []
     for it, batch in enumerate(tqdm(dl), start=1):
@@ -68,13 +69,15 @@ def main():
                                      tile_size=int(det.get("tile_size", 16)),
                                      k_per_tile=int(det.get("k_per_tile", 8)),
                                      max_keypoints=int(det.get("max_keypoints", 1024)),
-                                     valid_mask_img=batch.get("valid_depth1", None))
+                                     valid_mask_img=batch.get("valid_depth1", None),
+                                     use_reliability_in_score=use_rel_score)
         k2 = extract_keypoints_torch(out2.heatmap, out2.desc, out2.offset, out2.reliability,
                                      stride=stride, nms_radius=int(det.get("nms_radius", 4)),
                                      tile_size=int(det.get("tile_size", 16)),
                                      k_per_tile=int(det.get("k_per_tile", 8)),
                                      max_keypoints=int(det.get("max_keypoints", 1024)),
-                                     valid_mask_img=batch.get("valid_depth2", None))
+                                     valid_mask_img=batch.get("valid_depth2", None),
+                                     use_reliability_in_score=use_rel_score)
 
         d1 = k1.desc[0]
         d2 = k2.desc[0]

@@ -1,15 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
+import math
 
 import torch
 import torch.nn.functional as F
 
 from dino_slam3.geometry.projection import unproject, transform, project
-from dino_slam3.geometry.se3 import se3_error
-from dino_slam3.slam.keypoints_torch import extract_keypoints_torch, KeypointsTorch
-
-import kornia
 
 def _depth_at(depth: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
     """
@@ -69,6 +66,7 @@ class LossStats:
     num_samples: int
     num_valid: int
     valid_ratio: float
+    occlusion_ratio: float = 0.0
 
 
 def compute_losses(
@@ -111,7 +109,13 @@ def compute_losses(
         T21 = T21.unsqueeze(0).expand(B, -1, -1)
 
     # ---------------- helpers (self-contained) ----------------
-    def stratified_sample(valid: torch.Tensor, num: int, border: int = 8) -> torch.Tensor:
+    def stratified_sample(
+        valid: torch.Tensor,
+        num: int,
+        border: int = 8,
+        heatmap: Optional[torch.Tensor] = None,
+        guided_ratio: float = 0.0,
+    ) -> torch.Tensor:
         """valid: (B,1,H,W) -> xy: (B,num,2) in image coords"""
         Bv, _, Hv, Wv = valid.shape
         g = int(max(1, round(num ** 0.5)))
@@ -142,6 +146,32 @@ def compute_losses(
                 if idx.numel() > 0:
                     sel = idx[torch.randint(0, idx.shape[0], (num,), device=valid.device)]
                     xy = torch.stack([sel[:, 1].float(), sel[:, 0].float()], dim=-1)  # x,y
+
+            # Mix in detector-guided samples so training aligns with evaluation keypoints.
+            if heatmap is not None and guided_ratio > 0.0:
+                Hf, Wf = heatmap.shape[-2:]
+                vf = F.interpolate(valid[b : b + 1], size=(Hf, Wf), mode="nearest")[0, 0] > 0.5
+                hf = torch.sigmoid(heatmap[b, 0].float())
+                bf = int(max(1, round(border / max(float(stride), 1.0))))
+                if bf > 0:
+                    hf[:bf, :] = -1e9
+                    hf[-bf:, :] = -1e9
+                    hf[:, :bf] = -1e9
+                    hf[:, -bf:] = -1e9
+                flat = hf.reshape(-1)
+                mask_flat = vf.reshape(-1)
+                if bool(mask_flat.any()):
+                    scores = flat.masked_fill(~mask_flat, -1e9)
+                    n_guided = int(min(num, max(1, round(num * float(guided_ratio)))))
+                    k = int(min(n_guided, int(mask_flat.sum().item())))
+                    if k > 0:
+                        idx_top = torch.topk(scores, k=k, dim=0, largest=True).indices
+                        y = torch.div(idx_top, Wf, rounding_mode="floor")
+                        x = idx_top - y * Wf
+                        guided_xy = torch.stack([x.float() * float(stride), y.float() * float(stride)], dim=-1)
+                        guided_xy[:, 0] = guided_xy[:, 0].clamp(0.0, float(Wv - 1))
+                        guided_xy[:, 1] = guided_xy[:, 1].clamp(0.0, float(Hv - 1))
+                        xy[:k] = guided_xy
             out.append(xy)
         return torch.stack(out, dim=0)
 
@@ -153,6 +183,15 @@ def compute_losses(
         lin = y * Wd + x
         flat = depth[:, 0].reshape(Bd, -1)
         return torch.gather(flat, 1, lin)
+
+    def sample_depth_bilinear(depth: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
+        """depth: (B,1,H,W), xy:(B,N,2) -> (B,N) bilinear sampling in pixel coords"""
+        Bd, _, Hd, Wd = depth.shape
+        gx = (xy[..., 0] / float(max(Wd - 1, 1))) * 2.0 - 1.0
+        gy = (xy[..., 1] / float(max(Hd - 1, 1))) * 2.0 - 1.0
+        grid = torch.stack([gx, gy], dim=-1).unsqueeze(2)  # (B,N,1,2)
+        z = F.grid_sample(depth.float(), grid.float(), mode="bilinear", align_corners=True)
+        return z[:, 0, :, 0]
 
     def xy_to_grid(xy_f: torch.Tensor, Hf: int, Wf: int) -> torch.Tensor:
         """xy_f (B,N,2) in feature coords -> grid (B,N,1,2) in [-1,1]"""
@@ -195,6 +234,40 @@ def compute_losses(
         loss = alpha_t * ((1 - p_t) ** gamma) * ce
         return loss.mean()
 
+    def epipolar_distance_px(
+        xy1_img: torch.Tensor,  # (B,N,2)
+        xy2_img: torch.Tensor,  # (B,N,2)
+        Kb: torch.Tensor,       # (B,3,3)
+        T21b: torch.Tensor,     # (B,4,4)
+    ) -> torch.Tensor:
+        """Symmetric-free epipolar distance of x2 to line F x1 in pixels."""
+        out = []
+        Bn = int(xy1_img.shape[0])
+        for b in range(Bn):
+            x1 = xy1_img[b].float()
+            x2 = xy2_img[b].float()
+            x1h = torch.cat([x1, torch.ones_like(x1[:, :1])], dim=-1)  # (N,3)
+            x2h = torch.cat([x2, torch.ones_like(x2[:, :1])], dim=-1)  # (N,3)
+
+            R = T21b[b, :3, :3].float()
+            t = T21b[b, :3, 3].float()
+            tx = torch.zeros((3, 3), device=xy1_img.device, dtype=torch.float32)
+            tx[0, 1] = -t[2]
+            tx[0, 2] = t[1]
+            tx[1, 0] = t[2]
+            tx[1, 2] = -t[0]
+            tx[2, 0] = -t[1]
+            tx[2, 1] = t[0]
+            E = tx @ R
+            Kinv = torch.linalg.inv(Kb[b].float())
+            Fm = Kinv.t() @ E @ Kinv  # (3,3)
+
+            l2 = x1h @ Fm.t()  # (N,3)
+            numer = torch.abs((x2h * l2).sum(dim=-1))
+            denom = torch.sqrt(l2[:, 0] * l2[:, 0] + l2[:, 1] * l2[:, 1] + 1e-6)
+            out.append(numer / denom)
+        return torch.stack(out, dim=0)
+
     # ---------------- cfg defaults ----------------
     geom = cfg.get("geom", {})
     contrastive = cfg.get("contrastive", {})
@@ -217,9 +290,25 @@ def compute_losses(
     N = int(_pick(geom, "sample_points", "sample_points", 1024))
     border = int(_pick(geom, "border", "border", 8))
     depth_cons_m = float(_pick(geom, "depth_consistency_m", "depth_consistency_m", 0.05))
+    depth_cons_rel = float(_pick(geom, "depth_consistency_rel", None, 0.03))
+    guided_ratio = float(_pick(geom, "heatmap_guided_ratio", None, 0.0))
+    soft_refine_window = int(_pick(geom, "soft_refine_window", None, 5))
+    if soft_refine_window % 2 == 0:
+        soft_refine_window += 1
+    require_valid_depth2 = bool(_pick(geom, "require_valid_depth2", None, True))
+    fb_consistency_px = float(_pick(geom, "fb_consistency_px", None, 2.0))
+    z_min_m = float(_pick(cfg, "z_min_m", None, 0.10))
+    w_pose = float(_pick(geom, "pose_weight", "w_pose", 0.0))
+    w_epipolar = float(_pick(geom, "epipolar_weight", None, 0.0))
+    pose_det_weight = float(_pick(geom, "pose_det_weight", None, 0.0))
+    pose_det_topk = int(_pick(geom, "pose_det_topk", None, 256))
 
     temperature = float(_pick(contrastive, "temperature", "temperature", 0.07))
     max_pos = int(_pick(contrastive, "max_positives", None, contrastive.get("num_negatives", 512)))
+    min_pairs = int(_pick(contrastive, "min_pairs", None, 8))
+    triplet_margin = float(_pick(contrastive, "triplet_margin", None, 0.10))
+    triplet_weight = float(_pick(contrastive, "triplet_weight", None, 0.0))
+    mnn_consistency_weight = float(_pick(contrastive, "mnn_consistency_weight", None, 0.0))
     w_desc = float(_pick(contrastive, "weight", "w_desc", 1.0))
 
     w_repeat = float(_pick(detector, "weight", "w_repeat", 1.0))
@@ -227,16 +316,33 @@ def compute_losses(
     det_alpha = float(_pick(detector, "alpha", None, 0.25))
     det_gamma = float(_pick(detector, "gamma", None, 2.0))
     target_mean = float(_pick(detector, "target_mean", None, 0.01))
+    peak_w = float(_pick(detector, "peakiness_weight", None, 0.0))
+    peak_margin = float(_pick(detector, "peak_margin", None, 0.1))
+    coverage_weight = float(_pick(detector, "coverage_weight", None, 0.0))
+    coverage_target = float(_pick(detector, "coverage_target", None, 0.35))
+    coverage_tile = int(_pick(detector, "coverage_tile", None, 4))
+    coverage_thresh = float(_pick(detector, "coverage_thresh", None, 0.30))
+    entropy_weight = float(_pick(detector, "entropy_weight", None, 0.0))
+    entropy_target = float(_pick(detector, "entropy_target", None, 0.65))
 
     w_refine = float(_pick(offset_cfg, "weight", "w_refine", 0.2))
+    offset_soft_target_mix = float(_pick(offset_cfg, "soft_target_mix", None, 0.5))
     w_rel = float(_pick(rel_cfg, "weight", "w_reliability", 0.05))
     rel_target = float(_pick(rel_cfg, "target_mean", None, 0.1))
     rel_mode = str(_pick(rel_cfg, "mode", None, "cosine")).lower()
     rel_pos_weight = float(_pick(rel_cfg, "pos_weight", None, 2.0))
     rel_mean_reg_weight = float(_pick(rel_cfg, "mean_reg_weight", None, 0.1))
+    rel_reproj_sigma_px = float(_pick(rel_cfg, "reproj_sigma_px", None, 2.0))
+    rel_hybrid_mix = float(_pick(rel_cfg, "hybrid_mix", None, 0.5))
 
     # ---------------- geometry correspondences ----------------
-    xy1 = stratified_sample(valid1, N, border=border)  # (B,N,2)
+    xy1 = stratified_sample(
+        valid1,
+        N,
+        border=border,
+        heatmap=out1.heatmap if guided_ratio > 0.0 else None,
+        guided_ratio=guided_ratio,
+    )  # (B,N,2)
     pts1 = unproject(depth1, K, xy1)
     if pts1.numel() == 0 or pts1.shape[1] == 0:
         z = torch.zeros([], device=device)
@@ -249,7 +355,7 @@ def compute_losses(
             "loss_rel": z,
             "loss_pose": z,
         }
-        stats = LossStats(num_samples=B * N, num_valid=0, valid_ratio=0.0)
+        stats = LossStats(num_samples=B * N, num_valid=0, valid_ratio=0.0, occlusion_ratio=0.0)
         return losses, stats
 
     pts2 = transform(T21, pts1)
@@ -259,13 +365,41 @@ def compute_losses(
     inb = (x2 >= 0) & (x2 <= (W - 1)) & (y2 >= 0) & (y2 <= (H - 1)) & (pts2[..., 2] > 1e-3)
 
     z2 = pts2[..., 2]
-    d2_obs = sample_depth(depth2, xy2)
-    depth_ok = (d2_obs <= 0.0) | (torch.abs(d2_obs - z2) < depth_cons_m)
+    d2_obs = sample_depth_bilinear(depth2, xy2)
+    valid2_obs = sample_depth_bilinear(valid2, xy2) > 0.5
+    d2_valid = torch.isfinite(d2_obs) & (d2_obs > z_min_m)
+    if require_valid_depth2:
+        d2_valid = d2_valid & valid2_obs
 
-    mask = inb & depth_ok
+    depth_bound = depth_cons_m + depth_cons_rel * torch.abs(z2)
+    depth_ok = torch.abs(d2_obs - z2) < depth_bound
+
+    fb_ok = torch.ones_like(inb, dtype=torch.bool)
+    if fb_consistency_px > 0.0:
+        fx = K[:, 0, 0].unsqueeze(1)
+        fy = K[:, 1, 1].unsqueeze(1)
+        cx = K[:, 0, 2].unsqueeze(1)
+        cy = K[:, 1, 2].unsqueeze(1)
+        X2 = (x2 - cx) * d2_obs / fx
+        Y2 = (y2 - cy) * d2_obs / fy
+        pts2_obs = torch.stack([X2, Y2, d2_obs], dim=-1)
+        T12 = torch.linalg.inv(T21)
+        pts1_back = transform(T12, pts2_obs)
+        xy1_back = project(pts1_back, K)
+        fb_err = torch.linalg.norm(xy1_back - xy1, dim=-1)
+        fb_ok = fb_err < float(fb_consistency_px)
+
+    mask = inb & d2_valid & depth_ok & fb_ok
     m = mask.float()
     num_valid = int(mask.sum().item())
-    stats = LossStats(num_samples=B * N, num_valid=num_valid, valid_ratio=float(m.mean().item()))
+    denom_occ = inb.float().sum().clamp(min=1.0)
+    occlusion_ratio = float(((inb & ~mask).float().sum() / denom_occ).item())
+    stats = LossStats(
+        num_samples=B * N,
+        num_valid=num_valid,
+        valid_ratio=float(m.mean().item()),
+        occlusion_ratio=occlusion_ratio,
+    )
 
     # Convert to feature coords
     xy1_f = xy1 / float(stride)
@@ -273,7 +407,7 @@ def compute_losses(
 
     # ---------------- descriptor InfoNCE (stable: uses torch.mm only) ----------------
     valid_flat = mask.view(-1)
-    if valid_flat.sum() < 16:
+    if int(valid_flat.sum().item()) < max(2, min_pairs):
         loss_desc = torch.tensor(0.0, device=device)
     else:
         d1 = grid_sample_desc(out1.desc, xy1_f).reshape(-1, out1.desc.shape[1])
@@ -303,6 +437,22 @@ def compute_losses(
             loss_b = F.cross_entropy(logits.t(), labels)
             loss_desc = 0.5 * (loss_a + loss_b)
 
+            # Extra hard-negative pressure improves descriptor ranking for inlier metrics.
+            if triplet_weight > 0.0 and M > 1:
+                sim = torch.mm(d1v, d2v.t())  # cosine similarity (unnormalized temp)
+                eye = torch.eye(M, device=device, dtype=torch.bool)
+                pos = sim.diag()
+                row_hard = sim.masked_fill(eye, -1e9).max(dim=1).values
+                col_hard = sim.masked_fill(eye, -1e9).max(dim=0).values
+                tri_row = F.relu(float(triplet_margin) - pos + row_hard).mean()
+                tri_col = F.relu(float(triplet_margin) - pos + col_hard).mean()
+                loss_desc = loss_desc + float(triplet_weight) * 0.5 * (tri_row + tri_col)
+                if mnn_consistency_weight > 0.0:
+                    p12 = F.softmax(logits, dim=1)
+                    p21 = F.softmax(logits.t(), dim=1).t()
+                    loss_mnn = F.smooth_l1_loss(p12, p21, reduction="mean")
+                    loss_desc = loss_desc + float(mnn_consistency_weight) * loss_mnn
+
     # ---------------- detector/repeatability loss ----------------
     heat1 = grid_sample_1c(out1.heatmap, xy1_f)  # (B,N)
     loss_rep1 = focal_bce_with_logits(heat1, m, alpha=det_alpha, gamma=det_gamma)
@@ -315,6 +465,50 @@ def compute_losses(
 
     loss_repeat = 0.5 * (loss_rep1 + loss_rep2)
 
+    if peak_w > 0.0:
+        neigh = torch.tensor(
+            [[-1.0, 0.0], [1.0, 0.0], [0.0, -1.0], [0.0, 1.0], [-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]],
+            device=device,
+            dtype=xy1_f.dtype,
+        )
+
+        def _peak_penalty(logits: torch.Tensor, xy_f: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+            c = grid_sample_1c(logits, xy_f)
+            neigh_vals = []
+            for dxy in neigh:
+                neigh_vals.append(grid_sample_1c(logits, xy_f + dxy.view(1, 1, 2)))
+            nmax = torch.stack(neigh_vals, dim=0).amax(dim=0)
+            penalty = F.relu(nmax + float(peak_margin) - c)
+            denom = weights.sum().clamp(min=1.0)
+            return (penalty * weights).sum() / denom
+
+        loss_peak = 0.5 * (
+            _peak_penalty(out1.heatmap, xy1_f, m)
+            + _peak_penalty(out2.heatmap, xy2_f, m)
+        )
+        loss_repeat = loss_repeat + float(peak_w) * loss_peak
+
+    if coverage_weight > 0.0:
+        def _coverage_loss(logits: torch.Tensor) -> torch.Tensor:
+            p = torch.sigmoid(logits.float())
+            t = max(1, int(coverage_tile))
+            pooled = F.max_pool2d(p, kernel_size=t, stride=t)
+            occ = torch.sigmoid((pooled - float(coverage_thresh)) / 0.05).mean()
+            return (occ - float(coverage_target)).abs()
+        loss_repeat = loss_repeat + float(coverage_weight) * 0.5 * (
+            _coverage_loss(out1.heatmap) + _coverage_loss(out2.heatmap)
+        )
+
+    if entropy_weight > 0.0:
+        def _entropy_loss(logits: torch.Tensor) -> torch.Tensor:
+            p = torch.sigmoid(logits.float()).reshape(B, -1)
+            p = p / p.sum(dim=1, keepdim=True).clamp(min=1e-8)
+            ent = -(p * p.clamp(min=1e-8).log()).sum(dim=1) / max(math.log(max(p.shape[1], 2)), 1e-8)
+            return (ent - float(entropy_target)).abs().mean()
+        loss_repeat = loss_repeat + float(entropy_weight) * 0.5 * (
+            _entropy_loss(out1.heatmap) + _entropy_loss(out2.heatmap)
+        )
+
     # Sparsity regularizer (global)
     p1 = torch.sigmoid(out1.heatmap.float()).mean()
     p2 = torch.sigmoid(out2.heatmap.float()).mean()
@@ -323,26 +517,27 @@ def compute_losses(
     # ---------------- offset refinement loss ----------------
     loss_refine = torch.tensor(0.0, device=device)
     if getattr(out1, "offset", None) is not None and out1.offset is not None:
-        xy1_int = xy1_f.round()
         xy2_int = xy2_f.round()
-
-        tgt1 = (xy1_f - xy1_int).detach()
-        tgt2 = (xy2_f - xy2_int).detach()
-
-        pred1 = gather_map_at_xy_int(out1.offset.float(), xy1_int)[..., 0:2]
         pred2 = gather_map_at_xy_int(out2.offset.float(), xy2_int)[..., 0:2]
 
-        w = m.unsqueeze(-1)
-        denom = w.sum().clamp(min=1.0)
-        loss_refine_1 = (F.smooth_l1_loss(pred1, tgt1, reduction="none") * w).sum() / denom
-
         if mask.sum() > 0:
+            tgt2 = xy2_f.detach()
+            if offset_soft_target_mix > 0.0:
+                with torch.no_grad():
+                    q_desc = grid_sample_desc(out1.desc.detach(), xy1_f)
+                    soft_xy2 = _soft_refine(
+                        out2.desc.detach(),
+                        centers_f=xy2_int.float(),
+                        query_desc=q_desc,
+                        window=soft_refine_window,
+                    )
+                    mix = float(min(max(offset_soft_target_mix, 0.0), 1.0))
+                    tgt2 = (1.0 - mix) * tgt2 + mix * soft_xy2
+            tgt2 = (tgt2 - xy2_int).clamp(min=-0.5, max=0.5)
+
             w2 = mask.float().unsqueeze(-1)
             denom2 = w2.sum().clamp(min=1.0)
-            loss_refine_2 = (F.smooth_l1_loss(pred2, tgt2, reduction="none") * w2).sum() / denom2
-            loss_refine = 0.5 * (loss_refine_1 + loss_refine_2)
-        else:
-            loss_refine = loss_refine_1
+            loss_refine = (F.smooth_l1_loss(pred2, tgt2, reduction="none") * w2).sum() / denom2
 
     # ---------------- reliability / uncertainty ----------------
     loss_rel = torch.tensor(0.0, device=device)
@@ -355,12 +550,43 @@ def compute_losses(
         else:
             rel_logits = grid_sample_1c(out1.reliability, xy1_f)
             with torch.no_grad():
-                d1_rel = grid_sample_desc(out1.desc.detach(), xy1_f)
-                d2_rel = grid_sample_desc(out2.desc.detach(), xy2_f)
-                d1_rel = F.normalize(d1_rel, dim=-1, eps=1e-6)
-                d2_rel = F.normalize(d2_rel, dim=-1, eps=1e-6)
-                cos_sim = (d1_rel * d2_rel).sum(dim=-1)  # (B,N), in [-1,1]
-                rel_target_map = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0)
+                rel_target_cos = None
+                rel_target_reproj = None
+                if rel_mode in {"cosine", "hybrid"}:
+                    d1_rel = grid_sample_desc(out1.desc.detach(), xy1_f)
+                    d2_rel = grid_sample_desc(out2.desc.detach(), xy2_f)
+                    d1_rel = F.normalize(d1_rel, dim=-1, eps=1e-6)
+                    d2_rel = F.normalize(d2_rel, dim=-1, eps=1e-6)
+                    cos_sim = (d1_rel * d2_rel).sum(dim=-1)  # (B,N), in [-1,1]
+                    rel_target_cos = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0)
+
+                if rel_mode in {"reproj", "hybrid"}:
+                    q_desc_rel = grid_sample_desc(out1.desc.detach(), xy1_f)
+                    soft_xy2_rel = _soft_refine(
+                        out2.desc.detach(),
+                        centers_f=xy2_f.detach(),
+                        query_desc=q_desc_rel,
+                        window=soft_refine_window,
+                    )
+                    err_px = torch.linalg.norm((soft_xy2_rel - xy2_f.detach()) * float(stride), dim=-1)
+                    sigma = max(float(rel_reproj_sigma_px), 1e-3)
+                    rel_target_reproj = torch.exp(-0.5 * (err_px / sigma) ** 2).clamp(0.0, 1.0)
+
+                if rel_mode == "reproj":
+                    rel_target_map = rel_target_reproj
+                elif rel_mode == "hybrid":
+                    mix = float(min(max(rel_hybrid_mix, 0.0), 1.0))
+                    if rel_target_cos is None:
+                        rel_target_map = rel_target_reproj
+                    elif rel_target_reproj is None:
+                        rel_target_map = rel_target_cos
+                    else:
+                        rel_target_map = (1.0 - mix) * rel_target_cos + mix * rel_target_reproj
+                else:
+                    rel_target_map = rel_target_cos
+
+                if rel_target_map is None:
+                    rel_target_map = torch.zeros_like(m)
                 rel_target_map = rel_target_map * m
                 rel_weights = torch.where(
                     rel_target_map > 0.5,
@@ -376,9 +602,76 @@ def compute_losses(
             )
             loss_rel = rel_bce + rel_mean_reg_weight * mean_reg
 
-    # ---------------- pose loss placeholder (0) ----------------
-    # (You can add pose supervision later if desired.)
     loss_pose = torch.tensor(0.0, device=device)
+    if w_pose > 0.0 and mask.sum() > 0:
+        q_desc = grid_sample_desc(out1.desc, xy1_f)  # (B,N,D)
+        soft_xy2 = _soft_refine(
+            out2.desc,
+            centers_f=xy2_f.detach(),
+            query_desc=q_desc,
+            window=soft_refine_window,
+        )
+        dxy_px = (soft_xy2 - xy2_f.detach()) * float(stride)
+        e = torch.sqrt((dxy_px * dxy_px).sum(dim=-1) + 1e-6)
+        denom = m.sum().clamp(min=1.0)
+        loss_pose = (e * m).sum() / denom
+        if w_epipolar > 0.0:
+            epi = epipolar_distance_px(
+                xy1_img=xy1.detach(),
+                xy2_img=soft_xy2 * float(stride),
+                Kb=K,
+                T21b=T21,
+            )
+            epi_loss = (epi * m).sum() / denom
+            loss_pose = loss_pose + float(w_epipolar) * epi_loss
+
+    if w_pose > 0.0 and pose_det_weight > 0.0:
+        with torch.no_grad():
+            Hf, Wf = out1.heatmap.shape[-2:]
+            flat = torch.sigmoid(out1.heatmap.float()).reshape(B, -1)
+            v1f = F.interpolate(valid1.float(), size=(Hf, Wf), mode="nearest").reshape(B, -1) > 0.5
+            scores = flat.masked_fill(~v1f, -1e9)
+            Ksel = int(min(max(8, pose_det_topk), Hf * Wf))
+            idx_top = torch.topk(scores, k=Ksel, dim=1, largest=True).indices
+            yy = torch.div(idx_top, Wf, rounding_mode="floor")
+            xx = idx_top - yy * Wf
+            xy1_top = torch.stack([xx.float(), yy.float()], dim=-1) * float(stride)
+
+            pts1_top = unproject(depth1, K, xy1_top)
+            pts2_top = transform(T21, pts1_top)
+            xy2_top = project(pts2_top, K)
+            inb_top = (
+                (xy2_top[..., 0] >= 0.0) & (xy2_top[..., 0] <= float(W - 1)) &
+                (xy2_top[..., 1] >= 0.0) & (xy2_top[..., 1] <= float(H - 1)) &
+                (pts2_top[..., 2] > z_min_m)
+            )
+            d2_top = sample_depth_bilinear(depth2, xy2_top)
+            v2_top = sample_depth_bilinear(valid2, xy2_top) > 0.5
+            top_mask = inb_top & v2_top & (d2_top > z_min_m)
+
+        xy1_top_f = xy1_top / float(stride)
+        xy2_top_f = xy2_top / float(stride)
+        q_desc_top = grid_sample_desc(out1.desc, xy1_top_f)
+        soft_xy2_top = _soft_refine(
+            out2.desc,
+            centers_f=xy2_top_f.detach(),
+            query_desc=q_desc_top,
+            window=soft_refine_window,
+        )
+        dxy_top_px = (soft_xy2_top - xy2_top_f.detach()) * float(stride)
+        e_top = torch.sqrt((dxy_top_px * dxy_top_px).sum(dim=-1) + 1e-6)
+        m_top = top_mask.float()
+        denom_top = m_top.sum().clamp(min=1.0)
+        det_pose_loss = (e_top * m_top).sum() / denom_top
+        if w_epipolar > 0.0:
+            epi_top = epipolar_distance_px(
+                xy1_img=xy1_top.detach(),
+                xy2_img=soft_xy2_top * float(stride),
+                Kb=K,
+                T21b=T21,
+            )
+            det_pose_loss = det_pose_loss + float(w_epipolar) * (epi_top * m_top).sum() / denom_top
+        loss_pose = loss_pose + float(pose_det_weight) * det_pose_loss
 
     # ---------------- total ----------------
     losses = {
@@ -387,7 +680,7 @@ def compute_losses(
         "loss_sparsity": loss_sparsity * w_sparse,
         "loss_refine": loss_refine * w_refine,
         "loss_rel": loss_rel * w_rel,
-        "loss_pose": loss_pose,
+        "loss_pose": loss_pose * w_pose,
     }
     losses["loss_total"] = (
         losses["loss_desc"]

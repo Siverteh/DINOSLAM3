@@ -23,6 +23,7 @@ class DinoSLAM3FeatureExtractor:
         tile_size: int = 16,
         k_per_tile: int = 8,
         pad_to: int = 16,
+        use_reliability_in_score: bool = False,
     ):
         self.device = torch.device(device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model = model.to(self.device).eval()
@@ -32,6 +33,10 @@ class DinoSLAM3FeatureExtractor:
         self.tile_size = int(tile_size)
         self.k_per_tile = int(k_per_tile)
         self.pad_to = int(pad_to)
+        self.use_reliability_in_score = bool(use_reliability_in_score)
+        self.adaptive_tiling = bool(getattr(model, "adaptive_tiling", False))
+        self.adaptive_k_min = int(getattr(model, "adaptive_k_min", 1))
+        self.adaptive_k_max = getattr(model, "adaptive_k_max", None)
 
         if checkpoint_path:
             ckpt = torch.load(checkpoint_path, map_location="cpu")
@@ -78,6 +83,10 @@ class DinoSLAM3FeatureExtractor:
             k_per_tile=self.k_per_tile,
             max_keypoints=self.max_keypoints,
             valid_mask_img=None,
+            use_reliability_in_score=self.use_reliability_in_score,
+            adaptive_tiling=self.adaptive_tiling,
+            adaptive_k_min=self.adaptive_k_min,
+            adaptive_k_max=self.adaptive_k_max,
         )
         xy = k.xy_img[0].detach().cpu().numpy().astype(np.float32)
         desc = k.desc[0].detach().cpu().numpy().astype(np.float32)

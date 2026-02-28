@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import math
 import torch
 import torch.nn.functional as F
 
@@ -43,6 +44,10 @@ def extract_keypoints_torch(
     k_per_tile: int = 8,
     max_keypoints: int = 1024,
     valid_mask_img: Optional[torch.Tensor] = None,
+    use_reliability_in_score: bool = False,
+    adaptive_tiling: bool = False,
+    adaptive_k_min: int = 1,
+    adaptive_k_max: Optional[int] = None,
 ) -> KeypointsTorch:
     """
     Vectorized tile-topk keypoints (fast, stable, avoids one-side collapse).
@@ -60,7 +65,7 @@ def extract_keypoints_torch(
         vm_f = F.interpolate(vm.float(), size=(Hf, Wf), mode="nearest")
         score = score * (vm_f > 0.5).float()
 
-    if reliability_logits is not None:
+    if use_reliability_in_score and reliability_logits is not None:
         rel = torch.sigmoid(reliability_logits)
         score = score * rel
 
@@ -73,7 +78,27 @@ def extract_keypoints_torch(
     Ht, Wt = Hfp // t, Wfp // t
     tiles = score_p.view(B, 1, Ht, t, Wt, t).permute(0, 2, 4, 3, 5, 1).reshape(B, Ht * Wt, t * t)
 
-    k = min(int(k_per_tile), t * t)
+    k_base = min(int(k_per_tile), t * t)
+    if adaptive_tiling:
+        flat = score.reshape(B, -1).float()
+        norm = flat.sum(dim=1, keepdim=True).clamp(min=1e-9)
+        probs = flat / norm
+        entropy = -(probs * probs.clamp(min=1e-9).log()).sum(dim=1) / max(math.log(max(flat.shape[1], 2)), 1e-9)
+        if valid_mask_img is not None:
+            vm = valid_mask_img
+            if vm.dim() == 3:
+                vm = vm.unsqueeze(1)
+            vm_f = F.interpolate(vm.float(), size=(Hf, Wf), mode="nearest")
+            valid_ratio = vm_f.reshape(B, -1).mean(dim=1).clamp(0.0, 1.0)
+        else:
+            valid_ratio = torch.ones((B,), dtype=torch.float32, device=score.device)
+        adapt = (0.5 * entropy + 0.5 * valid_ratio).clamp(0.0, 1.0)
+        k_target = int(torch.round(torch.tensor(float(k_base), device=score.device) * adapt.mean()).item())
+        k_hi = int(k_base if adaptive_k_max is None else max(1, int(adaptive_k_max)))
+        k_lo = max(1, int(adaptive_k_min))
+        k = max(k_lo, min(k_hi, k_target, t * t))
+    else:
+        k = k_base
     vals, inds = torch.topk(tiles, k=k, dim=-1, largest=True, sorted=False)  # (B,T,k)
     vals = vals.squeeze(-1) if vals.dim() == 4 else vals  # keep
     inds = inds
