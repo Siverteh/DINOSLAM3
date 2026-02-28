@@ -22,3 +22,6 @@ tum_rgbd/
 *.csv
 tmp/
 tmp
+pyslam_integration/pyslam/
+.venv_pyslam_integration
+.venv_pyslam_integrationv2/
