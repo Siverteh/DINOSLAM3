@@ -1,0 +1,174 @@
+name: dino_dpvo_freiburg1_paper_sweep_v2_wild15k
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  pack_script: refocus_vo/scripts/run_dino_dpvo_freiburg1_paper_fixed96_pack.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+
+sweep:
+  no_improve_patience_steps: 3000
+  config_overrides:
+    training:
+      train_steps: 15000
+    eval:
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+
+evaluation:
+  coverage_gate: 0.95
+  baseline_assoc: 0.088408
+  baseline_ate: 0.223056
+  sequences:
+    - freiburg1_360
+    - freiburg1_desk
+    - freiburg1_desk2
+    - freiburg1_floor
+    - freiburg1_plant
+    - freiburg1_room
+    - freiburg1_rpy
+    - freiburg1_teddy
+    - freiburg1_xyz
+  current_champion:
+    run_id: broad_canonical_best_pure100_v1
+    checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    config: refocus_vo/configs/dino_dpvo_proposals_100_0_fullcover_fixed96_v1.yaml
+  baseline_candidates:
+    - run_id: freiburg1_paper_best_v1
+      checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v1_15k/train/assoc9_no_gradient_90_10_v1/best_pure100.pt
+      config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_pure_eval_v1.yaml
+      kind: current_paper_best
+
+runs:
+  - run_id: paperv2_anchor_no_gradient_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+
+  - run_id: paperv2_anchor_no_gradient_85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+
+  - run_id: paperv2_anchor_no_gradient_80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        candidate_pool: 256
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        max_dino_per_cell: 2
+
+  - run_id: paperv2_pure_strict_bigpool_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_pure_strict_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        candidate_pool: 320
+
+  - run_id: paperv2_pure_strict_no_gradient_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_pure_strict_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+
+  - run_id: paperv2_unfreeze2_75_25_no_gradient_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_unfreeze2_75_25_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+
+  - run_id: paperv2_unfreeze1_90_10_no_gradient_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_unfreeze1_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+
+  - run_id: paperv2_three_layer_no_gradient_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+
+  - run_id: paperv2_longwindow_no_gradient_x6_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_longwindow_x6_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x6_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+
+  - run_id: paperv2_continue_from_paper_best_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v1_15k/train/assoc9_no_gradient_90_10_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.100, 3000: 0.092, 4000: 0.0895}
+    config_overrides:
+      training:
+        train_steps: 8000
+        learning_rate: 0.00001

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dino-dpvo-thesis-code"
+version = "0.2.0"
+description = "Code-only thesis artifact for DINOv3-guided DPVO patch selection"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.2",
+  "torchvision",
+  "numpy",
+  "opencv-python",
+  "pillow",
+  "pyyaml",
+  "tqdm",
+  "rich",
+  "matplotlib",
+
+  # DINOv3 via Hugging Face Transformers (v4.56+ supports DINOv3 backbones)
+  "transformers>=4.56.0",
+
+  # Differentiable geometry utilities (PnP DLT)
+  "kornia>=0.7.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src", "refocus_vo" = "refocus_vo/src/refocus_vo"}
+
+[tool.setuptools.packages.find]
+where = ["src", "refocus_vo/src"]

@@ -1,0 +1,101 @@
+name: dino_dpvo_assoc9_sweep_v1
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  pack_script: refocus_vo/scripts/run_dino_dpvo_assoc9_fixed96_pack.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+
+evaluation:
+  coverage_gate: 0.95
+  baseline_assoc: 0.068249
+  baseline_ate: 0.377303
+  sequences:
+    - freiburg1_xyz
+    - freiburg1_desk
+    - freiburg1_room
+    - freiburg2_xyz
+    - freiburg2_desk
+    - freiburg2_desk_with_person
+    - freiburg3_sitting_xyz
+    - freiburg3_cabinet
+    - freiburg3_walking_static
+  current_champion:
+    run_id: assoc9_current_broad_champion_v1
+    checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    config: refocus_vo/configs/dino_dpvo_proposals_100_0_fullcover_fixed96_v1.yaml
+
+runs:
+  - run_id: assoc9_anchor_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_anchor_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_geom_95_5_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_geom_95_5_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_sem_75_25_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_sem_75_25_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_pure_strict_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_pure_strict_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_three_layer_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_unfreeze1_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_unfreeze1_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_unfreeze2_75_25_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_unfreeze2_75_25_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_no_gradient_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_longwindow_x6_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_longwindow_x6_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x6_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}
+  - run_id: assoc9_reverse_transfer_from_pure_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_reverse_transfer_from_pure_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_pure100_rescue_v3_ft/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {2000: 0.085, 3000: 0.075, 4000: 0.071}

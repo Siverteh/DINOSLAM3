@@ -1,0 +1,309 @@
+name: dino_dpvo_paper_lowtex_top5_repro_sweep_v1
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  pack_script: refocus_vo/scripts/run_dino_dpvo_freiburg1_paper_fixed96_pack.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+  seed: 13
+  deterministic: true
+
+sweep:
+  no_improve_patience_steps: 2500
+  required_usable_dev_steps: [500]
+  config_overrides:
+    training:
+      eval_every: 500
+      seed: 13
+      deterministic: true
+    eval:
+      seed: 13
+      deterministic: true
+      coverage_gate: 0.95
+      secondary_coverage_gate: 0.95
+      secondary_assoc_guardrail: 0.036
+      selection_metric: associated_ate
+      save_best_pure100: true
+      save_best_hybrid: false
+      run_hybrid_dev_eval: false
+      frontend_mode: dino_hybrid
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+      pure100_frontend_mode: dino_proposals
+      pure100_model_overrides:
+        native_fraction: 0.0
+        dino_fraction: 1.0
+        enforce_unique_semantic: true
+        semantic_backfill_source: dino
+        semantic_grid_rows: 6
+        semantic_grid_cols: 8
+        max_semantic_per_cell: 2
+        semantic_dedupe_schedule_px: [8.0, 6.0, 4.0, 2.0]
+      pure100_eval_overrides:
+        stride: 4
+        backend_thresh: 32.0
+        dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      secondary_eval_sequences:
+        - freiburg1_desk
+        - freiburg1_plant
+        - freiburg3_large_cabinet
+        - freiburg3_walking_static
+      secondary_frontend_mode: dino_proposals
+      secondary_model_overrides:
+        native_fraction: 0.0
+        dino_fraction: 1.0
+        enforce_unique_semantic: true
+        semantic_backfill_source: dino
+        semantic_grid_rows: 6
+        semantic_grid_cols: 8
+        max_semantic_per_cell: 2
+        semantic_dedupe_schedule_px: [8.0, 6.0, 4.0, 2.0]
+      secondary_eval_overrides:
+        stride: 4
+        backend_thresh: 32.0
+        dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+
+evaluation:
+  coverage_gate: 0.95
+  secondary_coverage_gate: 0.95
+  secondary_assoc_guardrail: 0.036
+  baseline_assoc: 0.078713
+  baseline_ate: 0.078713
+  broad_reference_assoc: 0.087841
+  lowtex_reference_assoc: 0.033489
+  top_dev_limit: 5
+  sequences:
+    - freiburg1_360
+    - freiburg1_desk
+    - freiburg1_desk2
+    - freiburg1_floor
+    - freiburg1_plant
+    - freiburg1_room
+    - freiburg1_rpy
+    - freiburg1_teddy
+    - freiburg1_xyz
+  secondary_pack_script: refocus_vo/scripts/run_dino_dpvo_tum_low_texture_fixed96_pack.sh
+  pack_env:
+    DPVO_STRIDE: "4"
+    DPVO_BACKEND_THRESH: "32.0"
+    DPVO_OPTS: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  secondary_pack_env:
+    DPVO_STRIDE: "4"
+    DPVO_BACKEND_THRESH: "32.0"
+    DPVO_OPTS: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  current_champion:
+    run_id: current_paper_runtime_winner
+    checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    config: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/pack_eval_configs/paperv2_three_layer_no_gradient_90_10_v1.yaml
+    kind: current_paper_runtime_winner
+
+runs:
+  - run_id: dual_paper_semantic_85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds:
+      1000: {paper_assoc: 0.0920, lowtex_assoc: 0.0395}
+      2000: {paper_assoc: 0.0865, lowtex_assoc: 0.0375}
+      4000: {paper_assoc: 0.0815, lowtex_assoc: 0.0365}
+    config_overrides:
+      model:
+        dino_layers: [3, 6, 11]
+        candidate_pool: 224
+        patch_budget: 96
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        enable_gradient_branch: false
+        use_offset_refinement: true
+        use_descriptor_bias: false
+        quality_floor: 0.05
+        static_score_weight: 0.35
+      training:
+        batch_size: 4
+        learning_rate: 0.000008
+        weight_decay: 0.000001
+        grad_clip: 5.0
+        train_steps: 10000
+      losses:
+        selector_bce: 1.0
+        staticness_bce: 0.50
+        offset_l1: 0.25
+        descriptor_reg: 0.01
+        coverage_kl: 0.02
+        coverage_uniform_mix: 0.10
+        proposal_repulsion: 0.0
+
+  - run_id: dual_paper_exact_continue_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds:
+      1000: {paper_assoc: 0.0920, lowtex_assoc: 0.0395}
+      2000: {paper_assoc: 0.0865, lowtex_assoc: 0.0375}
+      4000: {paper_assoc: 0.0815, lowtex_assoc: 0.0365}
+    config_overrides:
+      model:
+        dino_layers: [3, 6, 11]
+        candidate_pool: 224
+        patch_budget: 96
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        enable_gradient_branch: false
+        use_offset_refinement: true
+        use_descriptor_bias: false
+        quality_floor: 0.05
+        static_score_weight: 0.35
+      training:
+        batch_size: 4
+        learning_rate: 0.000005
+        weight_decay: 0.000001
+        grad_clip: 5.0
+        train_steps: 8000
+      losses:
+        selector_bce: 1.0
+        staticness_bce: 0.50
+        offset_l1: 0.25
+        descriptor_reg: 0.01
+        coverage_kl: 0.02
+        coverage_uniform_mix: 0.10
+        proposal_repulsion: 0.0
+
+  - run_id: dual_broad_three_layer_no_grad_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds:
+      1000: {paper_assoc: 0.0920, lowtex_assoc: 0.0395}
+      2000: {paper_assoc: 0.0865, lowtex_assoc: 0.0375}
+      4000: {paper_assoc: 0.0815, lowtex_assoc: 0.0365}
+    config_overrides:
+      model:
+        dino_layers: [3, 6, 11]
+        candidate_pool: 224
+        patch_budget: 96
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        enable_gradient_branch: false
+        use_offset_refinement: true
+        use_descriptor_bias: false
+        quality_floor: 0.05
+        static_score_weight: 0.35
+      training:
+        batch_size: 4
+        learning_rate: 0.000015
+        weight_decay: 0.000001
+        grad_clip: 5.0
+        train_steps: 12000
+      losses:
+        selector_bce: 1.0
+        staticness_bce: 0.50
+        offset_l1: 0.25
+        descriptor_reg: 0.01
+        coverage_kl: 0.02
+        coverage_uniform_mix: 0.10
+        proposal_repulsion: 0.0
+
+  - run_id: dual_paper_gradient_recover_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds:
+      1000: {paper_assoc: 0.0920, lowtex_assoc: 0.0395}
+      2000: {paper_assoc: 0.0865, lowtex_assoc: 0.0375}
+      4000: {paper_assoc: 0.0815, lowtex_assoc: 0.0365}
+    config_overrides:
+      model:
+        dino_layers: [3, 6, 11]
+        candidate_pool: 224
+        patch_budget: 96
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        enable_gradient_branch: true
+        gradient_branch_dim: 32
+        use_offset_refinement: true
+        use_descriptor_bias: false
+        quality_floor: 0.05
+        static_score_weight: 0.35
+      training:
+        batch_size: 4
+        learning_rate: 0.000008
+        weight_decay: 0.000001
+        grad_clip: 5.0
+        train_steps: 8000
+      losses:
+        selector_bce: 1.0
+        staticness_bce: 0.50
+        offset_l1: 0.25
+        descriptor_reg: 0.01
+        coverage_kl: 0.02
+        coverage_uniform_mix: 0.10
+        proposal_repulsion: 0.0
+
+  - run_id: dual_broad_no_grad_611_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds:
+      1000: {paper_assoc: 0.0920, lowtex_assoc: 0.0395}
+      2000: {paper_assoc: 0.0865, lowtex_assoc: 0.0375}
+      4000: {paper_assoc: 0.0815, lowtex_assoc: 0.0365}
+    config_overrides:
+      model:
+        dino_layers: [6, 11]
+        candidate_pool: 224
+        patch_budget: 96
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        enable_gradient_branch: false
+        use_offset_refinement: true
+        use_descriptor_bias: false
+        quality_floor: 0.05
+        static_score_weight: 0.35
+      training:
+        batch_size: 4
+        learning_rate: 0.000015
+        weight_decay: 0.000001
+        grad_clip: 5.0
+        train_steps: 12000
+      losses:
+        selector_bce: 1.0
+        staticness_bce: 0.50
+        offset_l1: 0.25
+        descriptor_reg: 0.01
+        coverage_kl: 0.02
+        coverage_uniform_mix: 0.10
+        proposal_repulsion: 0.0

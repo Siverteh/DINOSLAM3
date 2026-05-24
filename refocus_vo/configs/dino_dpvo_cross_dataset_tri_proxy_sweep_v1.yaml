@@ -1,0 +1,522 @@
+name: dino_dpvo_cross_dataset_tri_proxy_sweep_v1
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  euroc_dataset_root: refocus_vo/data/euroc_asl
+  kitti_dataset_root: refocus_vo/data/kitti_odometry
+  dpvo_root: refocus_vo/external/repos/DPVO
+  dpvo_weights_path: refocus_vo/external/repos/DPVO/dpvo.pth
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+  legacy_repro: true
+
+sweep:
+  no_improve_patience_steps: 0
+  worse_on_both_patience: 1
+  required_usable_dev_steps: [500]
+  skip_validation: true
+  config_overrides:
+    model:
+      patch_budget: 96
+      use_offset_refinement: true
+      use_descriptor_bias: false
+      descriptor_bias_mode: none
+      descriptor_bias_scale: 1.0
+      gmap_bias_scale: 1.0
+      quality_floor: 0.05
+      static_score_weight: 0.35
+      dino_layers: [3, 6, 11]
+      candidate_pool: 224
+      native_fraction: 0.90
+      dino_fraction: 0.10
+      hybrid_grid_rows: 6
+      hybrid_grid_cols: 8
+      max_dino_per_cell: 1
+      dedupe_radius_px: 8.0
+      enable_gradient_branch: false
+      track_survival_horizon: 3
+      micro_patch_count: 1
+      micro_patch_pattern: grid
+      micro_patch_spread_px: 4.0
+      micro_patch_center_mode: refined
+      anchor_budget: 0
+      anchor_max_age: 0
+      anchor_match_cosine: 0.75
+      anchor_match_radius_px: 24.0
+      anchor_refresh_fraction: 0.25
+      multiscale_region_rows: 0
+      multiscale_region_cols: 0
+      multiscale_points_per_region: 0
+      multiscale_coarse_layers: [11]
+      multiscale_fine_layers: [3, 6]
+      quality_mode: none
+      quality_edge_power: 1.0
+      quality_insert_threshold: 0.0
+      quality_ba_threshold: 0.0
+      quality_smoothing: 0.0
+    training:
+      batch_size: 4
+      weight_decay: 0.000001
+      grad_clip: 5.0
+      eval_every: 500
+      train_steps: 6000
+      legacy_repro: true
+      learning_rate: 0.000003
+    losses:
+      selector_bce: 1.0
+      staticness_bce: 0.50
+      offset_l1: 0.25
+      descriptor_reg: 0.01
+      coverage_kl: 0.02
+      coverage_uniform_mix: 0.10
+      proposal_repulsion: 0.0
+    eval:
+      coverage_gate: 0.95
+      secondary_coverage_gate: 0.95
+      selection_metric: associated_ate
+      selection_mode: hybrid_only
+      collect_dev_diagnostics: false
+      write_patch_diagnostics: false
+      write_dev_plots: false
+      save_best_pure100: false
+      save_best_hybrid: true
+      run_hybrid_dev_eval: true
+      frontend_mode: dino_hybrid
+      hybrid_frontend_mode: dino_hybrid
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      seed_runtime: false
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      hybrid_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      secondary_eval_sequences:
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+      pure100_frontend_mode: dino_proposals
+      pure100_model_overrides:
+        native_fraction: 0.0
+        dino_fraction: 1.0
+        enforce_unique_semantic: true
+        semantic_backfill_source: dino
+        semantic_grid_rows: 6
+        semantic_grid_cols: 8
+        max_semantic_per_cell: 2
+        semantic_dedupe_schedule_px: [8.0, 6.0, 4.0, 2.0]
+      pure100_eval_overrides:
+        stride: 4
+        backend_thresh: 32.0
+        dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+        seed_runtime: false
+
+proxy_validation:
+  top_k: 3
+  datasets:
+    tum:
+      module: refocus_vo.eval.external_dpvo
+      dataset_root: src/dino_slam3/data/tum_rgbd
+      sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      pressure_sequences:
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+    euroc:
+      module: refocus_vo.eval.external_dpvo_euroc
+      dataset_root: refocus_vo/data/euroc_asl
+      sequences:
+        - MH02
+        - MH04
+        - MH05
+        - V101
+        - V202
+        - V203
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+    kitti:
+      module: refocus_vo.eval.external_dpvo_kitti
+      dataset_root: refocus_vo/data/kitti_odometry
+      sequences:
+        - "02"
+        - "04"
+        - "05"
+        - "07"
+        - "10"
+      max_dt: 0.01
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=2048 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  baselines:
+    - method_id: current_multiscale_32x4_v1_hybrid75_25
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_ratio_ablation_v1/ratio_eval_configs/multiscale_32x4_v1__hybrid75_25.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    - method_id: current_micro4_grid_v1_hybrid90_10
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_ratio_ablation_v1/ratio_eval_configs/micro4_grid_v1__hybrid90_10.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/micro4_grid_v1/best_hybrid.pt
+    - method_id: dpvo_native_matched
+      frontend_mode: dpvo_native
+  references:
+    tum: current_multiscale_32x4_v1_hybrid75_25
+    euroc: dpvo_native_matched
+    kitti: dpvo_native_matched
+  gate:
+    tum_no_regression_multiplier: 1.03
+  ranking:
+    weights:
+      tum: 0.50
+      euroc: 0.30
+      kitti: 0.20
+
+full_benchmark:
+  tum_tie_abs_threshold: 0.005
+  references:
+    transfer: dpvo_native_matched
+  datasets:
+    tum:
+      module: refocus_vo.eval.external_dpvo
+      dataset_root: src/dino_slam3/data/tum_rgbd
+      sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_desk
+        - freiburg2_desk_with_person
+        - freiburg2_dishes
+        - freiburg2_flowerbouquet
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg2_pioneer_slam3
+        - freiburg2_rpy
+        - freiburg2_xyz
+        - freiburg3_cabinet
+        - freiburg3_large_cabinet
+        - freiburg3_long_office_household
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_sitting_xyz
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+        - freiburg3_walking_halfsphere
+        - freiburg3_walking_rpy
+        - freiburg3_walking_static
+        - freiburg3_walking_xyz
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+    euroc:
+      module: refocus_vo.eval.external_dpvo_euroc
+      dataset_root: refocus_vo/data/euroc_asl
+      sequences:
+        - MH01
+        - MH02
+        - MH03
+        - MH04
+        - MH05
+        - V101
+        - V102
+        - V103
+        - V201
+        - V202
+        - V203
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+    kitti:
+      module: refocus_vo.eval.external_dpvo_kitti
+      dataset_root: refocus_vo/data/kitti_odometry
+      sequences:
+        - "00"
+        - "01"
+        - "02"
+        - "03"
+        - "04"
+        - "05"
+        - "06"
+        - "07"
+        - "08"
+        - "09"
+        - "10"
+      max_dt: 0.01
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=2048 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  baselines:
+    - method_id: current_multiscale_32x4_v1_hybrid75_25
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_ratio_ablation_v1/ratio_eval_configs/multiscale_32x4_v1__hybrid75_25.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    - method_id: current_micro4_grid_v1_hybrid90_10
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_ratio_ablation_v1/ratio_eval_configs/micro4_grid_v1__hybrid90_10.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/micro4_grid_v1/best_hybrid.pt
+    - method_id: dpvo_native_matched
+      frontend_mode: dpvo_native
+
+runs:
+  - run_id: ms32x4_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+
+  - run_id: ms32x4_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+
+  - run_id: ms24x5_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+
+  - run_id: ms32x4_micro2_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+
+  - run_id: ms32x4_micro3_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 3
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 4.0
+        micro_patch_center_mode: refined
+
+  - run_id: ms24x5_cross3_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+
+  - run_id: ms32x4_anchor16_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+
+  - run_id: ms32x4_anchor16_micro2_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        track_survival_horizon: 4
+
+  - run_id: ms32x4_qualitysoft_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        quality_mode: soft
+        quality_edge_power: 1.5
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.10
+
+  - run_id: micro4_grid_r85_15_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/micro4_grid_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.85
+        dino_fraction: 0.15
+        micro_patch_count: 4
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 4.0
+        micro_patch_center_mode: refined
+        multiscale_region_rows: 0
+        multiscale_region_cols: 0
+        multiscale_points_per_region: 0

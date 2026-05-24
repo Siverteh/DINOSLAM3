@@ -1,0 +1,76 @@
+method_id: dino_dpvo_semantic_curriculum_unfreeze_v2
+feature_type: DINO_DPVO_SEMANTIC_CURRICULUM_UNFREEZE_V2
+
+model:
+  image_size: [240, 320]
+  dino_name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
+  dino_layers: [6, 11]
+  dino_dtype: bf16
+  dino_patch_size: 16
+  dpvo_patch_size: 3
+  semantic_candidate_pool: 128
+  semantic_patch_budget: 80
+  max_nodes_per_object_ratio: 0.20
+  k_mutual_neighbors: 4
+  local_patch_dim: 64
+  dpvo_dim: 384
+  corr_dim: 128
+  static_score_weight: 0.35
+  quality_floor: 0.05
+  use_offset_refinement: true
+  enable_gradient_branch: true
+  gradient_branch_dim: 32
+  dino_unfreeze_blocks: 2
+  track_survival_horizon: 2
+  coverage_grid_rows: 6
+  coverage_grid_cols: 8
+  hybrid_grid_rows: 6
+  hybrid_grid_cols: 8
+  max_semantic_per_cell: 1
+  dedupe_radius_px: 8.0
+
+training:
+  stage_name: stage3_partial_unfreeze
+  batch_size: 1
+  num_workers: 4
+  n_frames: 15
+  train_steps: 8000
+  learning_rate: 0.00002
+  dino_backbone_lr: 0.000002
+  weight_decay: 0.000001
+  grad_clip: 10.0
+  log_every: 50
+  eval_every: 1000
+  max_eval_batches: 4
+  warmup_structure_only_steps: 0
+  pose_weight_target: 10.0
+  pose_ramp_start_step: 0
+  pose_ramp_end_step: 2000
+  semantic_fraction_start: 0.40
+  semantic_fraction_mid: 0.50
+  semantic_fraction_end: 0.50
+  mix_ramp_1_end_step: 2000
+  mix_ramp_2_end_step: 4000
+  mix_hold_step: 4000
+  apply_stability_gate: false
+  stage2_stability_gate_improvement: 0.10
+  stage3_launch_gate_improvement: 0.15
+  dpvo_init_mode: none
+  dpvo_steps: 18
+  device: cuda
+
+losses:
+  flow_weight: 0.1
+  pose_weight: 10.0
+  selector_bce: 0.25
+  staticness_bce: 0.10
+  offset_l1: 0.05
+  coverage_kl: 0.02
+  coverage_uniform_mix: 0.15
+
+eval:
+  primary_eval_sequences:
+    - freiburg1_desk
+    - freiburg1_plant
+    - freiburg3_large_cabinet
+    - freiburg3_walking_static

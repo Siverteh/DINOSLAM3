@@ -1,0 +1,685 @@
+name: dino_dpvo_tum_euroc_live_dualproxy_15run_v3
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  euroc_dataset_root: refocus_vo/data/euroc_asl
+  dpvo_root: refocus_vo/external/repos/DPVO
+  dpvo_weights_path: refocus_vo/external/repos/DPVO/dpvo.pth
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+  legacy_repro: true
+
+sweep:
+  no_improve_patience_steps: 0
+  worse_on_both_patience: 0
+  min_failure_step: 2500
+  required_usable_dev_steps: [1500, 2000, 2500]
+  skip_validation: true
+  config_overrides:
+    model:
+      patch_budget: 96
+      use_offset_refinement: true
+      use_descriptor_bias: false
+      descriptor_bias_mode: none
+      descriptor_bias_scale: 1.0
+      gmap_bias_scale: 1.0
+      quality_floor: 0.05
+      static_score_weight: 0.35
+      dino_layers: [3, 6, 11]
+      candidate_pool: 224
+      native_fraction: 0.78
+      dino_fraction: 0.22
+      hybrid_grid_rows: 6
+      hybrid_grid_cols: 8
+      max_dino_per_cell: 1
+      dedupe_radius_px: 8.0
+      enable_gradient_branch: false
+      gradient_branch_dim: 32
+      dino_unfreeze_blocks: 0
+      local_patch_dim: 64
+      track_survival_horizon: 3
+      micro_patch_count: 1
+      micro_patch_pattern: grid
+      micro_patch_spread_px: 4.0
+      micro_patch_center_mode: refined
+      anchor_budget: 0
+      anchor_max_age: 0
+      anchor_match_cosine: 0.75
+      anchor_match_radius_px: 24.0
+      anchor_refresh_fraction: 0.25
+      multiscale_region_rows: 0
+      multiscale_region_cols: 0
+      multiscale_points_per_region: 0
+      multiscale_coarse_layers: [11]
+      multiscale_fine_layers: [3, 6]
+      quality_mode: none
+      quality_edge_power: 1.0
+      quality_insert_threshold: 0.0
+      quality_ba_threshold: 0.0
+      quality_smoothing: 0.0
+      use_register_context: false
+      register_context_scale: 0.0
+      register_context_target: fused
+    training:
+      batch_size: 4
+      weight_decay: 0.000001
+      grad_clip: 5.0
+      eval_every: 500
+      train_steps: 6000
+      legacy_repro: true
+      learning_rate: 0.000003
+      gram_anchor_start_step: 500
+      gram_anchor_sample_tokens: 128
+      gram_anchor_downsample_stride: 2
+    losses:
+      selector_bce: 1.0
+      staticness_bce: 0.50
+      offset_l1: 0.25
+      descriptor_reg: 0.01
+      coverage_kl: 0.02
+      coverage_uniform_mix: 0.10
+      proposal_repulsion: 0.0
+      gram_anchor: 0.0
+    eval:
+      coverage_gate: 0.95
+      secondary_coverage_gate: 0.95
+      selection_metric: dual_proxy_score
+      selection_mode: hybrid_only
+      collect_dev_diagnostics: false
+      write_patch_diagnostics: false
+      write_dev_plots: false
+      save_best_pure100: false
+      save_best_hybrid: true
+      run_hybrid_dev_eval: true
+      frontend_mode: dino_hybrid
+      hybrid_frontend_mode: dino_hybrid
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      seed_runtime: false
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      hybrid_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      secondary_eval_sequences:
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+
+proxy_validation:
+  use_live_training_eval: true
+  top_k: 5
+  datasets:
+    tum:
+      module: refocus_vo.eval.external_dpvo
+      dataset_root: src/dino_slam3/data/tum_rgbd
+      sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_near
+      pressure_sequences:
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_pioneer_slam2
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+    euroc:
+      module: refocus_vo.eval.external_dpvo_euroc
+      dataset_root: refocus_vo/data/euroc_asl
+      sequences:
+        - MH01
+        - MH02
+        - MH03
+        - MH04
+        - MH05
+        - V101
+        - V102
+        - V103
+        - V201
+        - V202
+        - V203
+      max_dt: 0.02
+      missing_penalty_m: 3.0
+      min_coverage_ok: 0.95
+      image_height: 240
+      image_width: 320
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  baselines:
+    - method_id: incumbent_qualitysoft_r78_22
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/generated_train_configs/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    - method_id: current_multiscale_32x4_v1_hybrid75_25
+      frontend_mode: dino_hybrid
+      frontend_config: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_ratio_ablation_v1/ratio_eval_configs/multiscale_32x4_v1__hybrid75_25.yaml
+      frontend_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_arch5x2_tumwin_sweep_v1_rerun1/train/multiscale_32x4_v1/best_hybrid.pt
+    - method_id: dpvo_native_matched
+      frontend_mode: dpvo_native
+  references:
+    tum: incumbent_qualitysoft_r78_22
+    euroc: dpvo_native_matched
+  gate:
+    tum_no_regression_multiplier: 1.10
+    tum_pressure_multiplier: 1.10
+    tum_proxy_min_wins_vs_dpvo: 8
+    euroc_proxy_min_wins_vs_dpvo_for_advancement: 7
+  ranking:
+    weights:
+      tum: 0.40
+      euroc: 0.30
+    win_weights:
+      tum: 0.15
+      euroc: 0.15
+  frozen_baselines:
+    tum_per_sequence: refocus_vo/runs/eval/tum_rgbd_freiburg123_arch_dual_finalists_5x_v1/summary/per_sequence_median.csv
+    euroc_per_sequence: refocus_vo/runs/eval/euroc_dpvo_multiscale_micro_5x_v1/summary/per_sequence_median.csv
+
+full_benchmark:
+  stage1_top_k: 5
+  stage1_repeats: 1
+  stage2_top_k: 2
+  repeats: 5
+  stage1_ranking:
+    weights:
+      tum_ate: 0.45
+      euroc_ate: 0.30
+      tum_wins: 0.10
+      euroc_wins: 0.15
+  final_ranking:
+    weights:
+      tum_ate: 0.45
+      euroc_ate: 0.30
+      tum_wins: 0.10
+      euroc_wins: 0.15
+  winner_gate:
+    tum_average_wins_vs_dpvo_min: 30.0
+    euroc_average_wins_vs_dpvo_min: 8.0
+    require_tum_mean_le_reference_tum: false
+    require_euroc_mean_lt_reference_euroc: true
+  references:
+    tum: incumbent_qualitysoft_r78_22
+    euroc: dpvo_native_matched
+  datasets:
+    tum:
+      module: refocus_vo.eval.external_dpvo
+      dataset_root: src/dino_slam3/data/tum_rgbd
+    euroc:
+      module: refocus_vo.eval.external_dpvo_euroc
+      dataset_root: refocus_vo/data/euroc_asl
+  frozen:
+    stage1_method_comparison: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/finalists/stage1_method_comparison.csv
+    stage1_method_aliases:
+      incumbent_qualitysoft_r78_22: ms32x4_micro2_anchor16_qualitysoft_r78_22_v1
+      current_multiscale_32x4_v1_hybrid75_25: multiscale_32x4_v1_hybrid75_25
+      dpvo_native_matched: dpvo_native
+
+runs:
+  - run_id: ms32x4_micro2_anchor16_qualitysoft_r78_22_v2
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.78
+        dino_fraction: 0.22
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+        quality_mode: soft
+        quality_edge_power: 1.3
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.08
+        track_survival_horizon: 4
+
+  - run_id: ms24x5_cross3_anchor12_register_anchor_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_anchor12_r80_20_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        anchor_budget: 12
+        anchor_max_age: 4
+        anchor_match_cosine: 0.76
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.15
+        use_register_context: true
+        register_context_scale: 0.10
+        register_context_target: anchor_refresh
+
+  - run_id: ms32x4_micro2_anchor12_r76_24_longlife_qualitysoft_v2
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor12_r76_24_longlife_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.76
+        dino_fraction: 0.24
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 12
+        anchor_max_age: 5
+        anchor_match_cosine: 0.75
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.12
+        track_survival_horizon: 5
+        quality_mode: soft
+        quality_edge_power: 1.2
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.06
+
+  - run_id: ms24x5_cross3_grad48_unfreeze1_gram03_r82_18_v3
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_grad48_unfreeze1_r82_18_v2/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.82
+        dino_fraction: 0.18
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        enable_gradient_branch: true
+        gradient_branch_dim: 48
+        dino_unfreeze_blocks: 1
+        local_patch_dim: 80
+        dino_layers: [1, 3, 6, 11]
+        multiscale_fine_layers: [1, 3, 6]
+        quality_mode: soft
+        quality_edge_power: 1.5
+        quality_insert_threshold: 0.06
+        quality_smoothing: 0.10
+      losses:
+        gram_anchor: 0.03
+
+  - run_id: ms24x5_cross3_anchor12_r80_20_v2
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_anchor12_r80_20_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        anchor_budget: 12
+        anchor_max_age: 4
+        anchor_match_cosine: 0.76
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.15
+        quality_mode: soft
+        quality_edge_power: 1.2
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.06
+        track_survival_horizon: 4
+
+  - run_id: ms32x4_micro2_anchor16_register_fused_r78_22_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.78
+        dino_fraction: 0.22
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+        quality_mode: soft
+        quality_edge_power: 1.3
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.08
+        use_register_context: true
+        register_context_scale: 0.06
+        register_context_target: fused
+
+  - run_id: ms32x4_micro2_anchor16_r80_20_v3
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_r80_20_v2/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 22.0
+        anchor_refresh_fraction: 0.20
+        track_survival_horizon: 4
+
+  - run_id: ms24x5_cross3_anchor12_descimapgmap_r80_20_v2
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_anchor12_r80_20_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        anchor_budget: 12
+        anchor_max_age: 4
+        anchor_match_cosine: 0.76
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.15
+        descriptor_bias_mode: imap_gmap
+        descriptor_bias_scale: 0.20
+        gmap_bias_scale: 0.10
+        candidate_pool: 256
+        max_dino_per_cell: 2
+        dedupe_radius_px: 6.0
+
+  - run_id: ms32x4_micro2_anchor16_qualitysoft_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.18
+        quality_mode: soft
+        quality_edge_power: 1.3
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.08
+        track_survival_horizon: 4
+
+  - run_id: ms24x5_cross3_register_desc_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_anchor12_r80_20_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        anchor_budget: 12
+        anchor_max_age: 4
+        anchor_match_cosine: 0.76
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.15
+        use_register_context: true
+        register_context_scale: 0.10
+        register_context_target: anchor_refresh
+        descriptor_bias_mode: imap_gmap
+        descriptor_bias_scale: 0.20
+        gmap_bias_scale: 0.10
+        candidate_pool: 256
+        max_dino_per_cell: 2
+        dedupe_radius_px: 6.0
+
+  - run_id: ms32x4_micro2_anchor12_r74_26_longlife_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor12_r76_24_longlife_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.74
+        dino_fraction: 0.26
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 12
+        anchor_max_age: 5
+        anchor_match_cosine: 0.75
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.12
+        track_survival_horizon: 5
+
+  - run_id: ms32x4_micro2_qualitysoft_gram03_r78_22_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.78
+        dino_fraction: 0.22
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+        quality_mode: soft
+        quality_edge_power: 1.3
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.08
+      losses:
+        gram_anchor: 0.03
+
+  - run_id: ms24x5_cross3_anchor16_qualitysoft_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_anchor12_r80_20_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.18
+        quality_mode: soft
+        quality_edge_power: 1.2
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.06
+
+  - run_id: ms24x5_cross3_grad48_unfreeze1_register_anchor_r80_20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms24x5_cross3_grad48_unfreeze1_r82_18_v2/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        micro_patch_count: 3
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+        enable_gradient_branch: true
+        gradient_branch_dim: 48
+        dino_unfreeze_blocks: 1
+        local_patch_dim: 80
+        dino_layers: [1, 3, 6, 11]
+        multiscale_fine_layers: [1, 3, 6]
+        use_register_context: true
+        register_context_scale: 0.10
+        register_context_target: anchor_refresh
+        anchor_budget: 12
+        anchor_max_age: 4
+        anchor_match_cosine: 0.76
+        anchor_match_radius_px: 20.0
+        anchor_refresh_fraction: 0.15
+        quality_mode: soft
+        quality_edge_power: 1.5
+        quality_insert_threshold: 0.06
+        quality_smoothing: 0.10
+
+  - run_id: ms32x4_micro2_anchor16_qualitysoft_desc_r78_22_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_tum_euroc_live_dualproxy_20run_v2/train/ms32x4_micro2_anchor16_qualitysoft_r78_22_v1/best_hybrid.pt
+    init_mode: partial
+    expected_eval_mode: hybrid
+    config_overrides:
+      model:
+        native_fraction: 0.78
+        dino_fraction: 0.22
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        micro_patch_count: 2
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 3.5
+        micro_patch_center_mode: refined
+        anchor_budget: 16
+        anchor_max_age: 3
+        anchor_match_cosine: 0.74
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.20
+        quality_mode: soft
+        quality_edge_power: 1.3
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.08
+        descriptor_bias_mode: imap_gmap
+        descriptor_bias_scale: 0.18
+        gmap_bias_scale: 0.10
+        candidate_pool: 256
+        max_dino_per_cell: 2
+        dedupe_radius_px: 6.0

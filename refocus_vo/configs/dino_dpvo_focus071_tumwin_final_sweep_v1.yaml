@@ -1,0 +1,306 @@
+name: dino_dpvo_focus071_tumwin_final_sweep_v1
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+  legacy_repro: true
+
+sweep:
+  no_improve_patience_steps: 0
+  worse_on_both_patience: 1
+  required_usable_dev_steps: [500]
+  skip_validation: true
+  config_overrides:
+    model:
+      patch_budget: 96
+      use_offset_refinement: true
+      use_descriptor_bias: false
+      quality_floor: 0.05
+      static_score_weight: 0.35
+      dino_layers: [3, 6, 11]
+      candidate_pool: 224
+      native_fraction: 0.90
+      dino_fraction: 0.10
+      hybrid_grid_rows: 6
+      hybrid_grid_cols: 8
+      max_dino_per_cell: 1
+      dedupe_radius_px: 8.0
+      enable_gradient_branch: false
+      track_survival_horizon: 3
+    training:
+      batch_size: 4
+      weight_decay: 0.000001
+      grad_clip: 5.0
+      eval_every: 500
+      train_steps: 6000
+      legacy_repro: true
+      learning_rate: 0.000003
+    losses:
+      selector_bce: 1.0
+      staticness_bce: 0.50
+      offset_l1: 0.25
+      descriptor_reg: 0.01
+      coverage_kl: 0.02
+      coverage_uniform_mix: 0.10
+      proposal_repulsion: 0.0
+    eval:
+      coverage_gate: 0.95
+      secondary_coverage_gate: 0.95
+      selection_metric: associated_ate
+      save_best_pure100: true
+      save_best_hybrid: false
+      run_hybrid_dev_eval: false
+      frontend_mode: dino_hybrid
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      seed_runtime: false
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+      secondary_eval_sequences:
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+      pure100_frontend_mode: dino_proposals
+      pure100_model_overrides:
+        native_fraction: 0.0
+        dino_fraction: 1.0
+        enforce_unique_semantic: true
+        semantic_backfill_source: dino
+        semantic_grid_rows: 6
+        semantic_grid_cols: 8
+        max_semantic_per_cell: 2
+        semantic_dedupe_schedule_px: [8.0, 6.0, 4.0, 2.0]
+      pure100_eval_overrides:
+        stride: 4
+        backend_thresh: 32.0
+        dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+        seed_runtime: false
+
+evaluation:
+  skip_validation: true
+  coverage_gate: 0.95
+  secondary_coverage_gate: 0.95
+  secondary_label: Freiburg2 pressure pack
+  top_dev_limit: 3
+  sequences:
+    - freiburg1_360
+    - freiburg1_room
+    - freiburg1_teddy
+    - freiburg2_360_hemisphere
+    - freiburg2_360_kidnap
+    - freiburg2_coke
+    - freiburg2_flowerbouquet_brownbackground
+    - freiburg2_metallic_sphere2
+    - freiburg2_pioneer_360
+    - freiburg2_pioneer_slam
+    - freiburg2_pioneer_slam2
+    - freiburg3_sitting_halfsphere
+    - freiburg3_sitting_rpy
+    - freiburg3_structure_texture_far
+    - freiburg3_structure_texture_near
+    - freiburg3_teddy
+  secondary_eval_sequences:
+    - freiburg2_360_hemisphere
+    - freiburg2_360_kidnap
+    - freiburg2_coke
+    - freiburg2_flowerbouquet_brownbackground
+    - freiburg2_metallic_sphere2
+    - freiburg2_pioneer_360
+    - freiburg2_pioneer_slam
+    - freiburg2_pioneer_slam2
+
+runs:
+  - run_id: tumwin_control_90_10_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides: {}
+
+  - run_id: tumwin_sem20_pool256_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        candidate_pool: 256
+        max_dino_per_cell: 2
+
+  - run_id: tumwin_sem25_pool256_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.75
+        dino_fraction: 0.25
+        candidate_pool: 256
+        max_dino_per_cell: 2
+
+  - run_id: tumwin_sem30_pool320_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.70
+        dino_fraction: 0.30
+        candidate_pool: 320
+        max_dino_per_cell: 2
+        dedupe_radius_px: 6.0
+
+  - run_id: tumwin_deep11_sem20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        dino_layers: [6, 11]
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        candidate_pool: 256
+        max_dino_per_cell: 2
+
+  - run_id: tumwin_densegrid_sem20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        hybrid_grid_rows: 8
+        hybrid_grid_cols: 10
+        max_dino_per_cell: 2
+        dedupe_radius_px: 6.0
+      losses:
+        coverage_uniform_mix: 0.15
+
+  - run_id: tumwin_repulse_sem20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        candidate_pool: 320
+        max_dino_per_cell: 2
+        track_survival_horizon: 4
+        proposal_repulsion_radius_px: 8.0
+        proposal_repulsion_topk: 128
+      losses:
+        proposal_repulsion: 0.02
+
+  - run_id: tumwin_static_sem20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        candidate_pool: 256
+        max_dino_per_cell: 2
+        static_score_weight: 0.45
+        quality_floor: 0.08
+
+  - run_id: tumwin_grad_repulse_sem20_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.80
+        dino_fraction: 0.20
+        candidate_pool: 320
+        max_dino_per_cell: 2
+        enable_gradient_branch: true
+        track_survival_horizon: 4
+        proposal_repulsion_radius_px: 8.0
+        proposal_repulsion_topk: 128
+      losses:
+        proposal_repulsion: 0.02
+
+  - run_id: tumwin_purelean_60_40_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    config_overrides:
+      model:
+        native_fraction: 0.60
+        dino_fraction: 0.40
+        dino_layers: [6, 11]
+        candidate_pool: 288
+        max_dino_per_cell: 3
+        dedupe_radius_px: 6.0
+        static_score_weight: 0.40
+        track_survival_horizon: 4
+        proposal_repulsion_radius_px: 8.0
+        proposal_repulsion_topk: 160
+      losses:
+        coverage_uniform_mix: 0.15
+        proposal_repulsion: 0.03

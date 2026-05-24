@@ -1,0 +1,54 @@
+method_id: dino_dpvo_semantic_head_from_dino_v1
+feature_type: DINO_DPVO_SEMANTIC_HEAD_FROM_DINO_V1
+
+model:
+  image_size: [240, 320]
+  dino_name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
+  dino_layers: [6, 11]
+  dino_dtype: bf16
+  dino_patch_size: 16
+  dpvo_patch_size: 3
+  semantic_candidate_pool: 128
+  semantic_patch_budget: 80
+  max_nodes_per_object_ratio: 0.20
+  k_mutual_neighbors: 4
+  local_patch_dim: 64
+  dpvo_dim: 384
+  corr_dim: 128
+  static_score_weight: 0.35
+  quality_floor: 0.05
+  use_offset_refinement: true
+  track_survival_horizon: 2
+  coverage_grid_rows: 6
+  coverage_grid_cols: 8
+
+training:
+  batch_size: 1
+  num_workers: 4
+  n_frames: 15
+  train_steps: 40000
+  learning_rate: 0.00005
+  weight_decay: 0.000001
+  grad_clip: 10.0
+  log_every: 50
+  eval_every: 1000
+  max_eval_batches: 4
+  warmup_structure_only_steps: 3000
+  dpvo_steps: 18
+  device: cuda
+
+losses:
+  flow_weight: 0.1
+  pose_weight: 10.0
+  selector_bce: 0.25
+  staticness_bce: 0.10
+  offset_l1: 0.05
+  coverage_kl: 0.02
+  coverage_uniform_mix: 0.15
+
+eval:
+  primary_eval_sequences:
+    - freiburg1_desk
+    - freiburg1_plant
+    - freiburg3_large_cabinet
+    - freiburg3_walking_static

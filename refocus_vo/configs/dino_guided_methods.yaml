@@ -1,0 +1,70 @@
+dino_methods:
+  - method_id: dino_balanced_611
+    feature_type: DINO_RGBD_GUIDED_BALANCED_611
+    layers: [6, 11]
+    weights:
+      consistency: 0.45
+      boundary: 0.20
+      depth_safe: 0.15
+      reprojection: 0.20
+    keep_ratio: 0.35
+    mask_policy: topk
+    coarse: hybrid
+    refine: point_to_plane
+    min_refine_pixels: 4096
+
+  - method_id: dino_balanced_3611
+    feature_type: DINO_RGBD_GUIDED_BALANCED_3611
+    layers: [3, 6, 11]
+    weights:
+      consistency: 0.45
+      boundary: 0.20
+      depth_safe: 0.15
+      reprojection: 0.20
+    keep_ratio: 0.35
+    mask_policy: topk
+    coarse: hybrid
+    refine: point_to_plane
+    min_refine_pixels: 4096
+
+  - method_id: dino_geometry_safe
+    feature_type: DINO_RGBD_GUIDED_GEOMETRY_SAFE
+    layers: [6, 11]
+    weights:
+      consistency: 0.30
+      boundary: 0.05
+      depth_safe: 0.25
+      reprojection: 0.40
+    keep_ratio: 0.25
+    mask_policy: topk
+    coarse: hybrid
+    refine: point_to_plane
+    min_refine_pixels: 6144
+
+  - method_id: dino_boundary_part
+    feature_type: DINO_RGBD_GUIDED_BOUNDARY_PART
+    layers: [6, 11]
+    weights:
+      consistency: 0.30
+      boundary: 0.45
+      depth_safe: 0.10
+      reprojection: 0.15
+    keep_ratio: 0.30
+    mask_policy: topk
+    coarse: hybrid
+    refine: point_to_plane
+    min_refine_pixels: 4096
+
+  - method_id: dino_consensus
+    feature_type: DINO_RGBD_GUIDED_CONSENSUS
+    layers: [6, 11]
+    weights:
+      consistency: 0.45
+      boundary: 0.20
+      depth_safe: 0.15
+      reprojection: 0.20
+    keep_ratio: 0.30
+    mask_policy: symmetric_consensus
+    coarse: hybrid
+    refine: point_to_plane
+    min_refine_pixels: 4096

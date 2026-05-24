@@ -1,0 +1,329 @@
+name: dino_dpvo_focus071_arch5x2_tumwin_sweep_v1
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+  legacy_repro: true
+
+sweep:
+  no_improve_patience_steps: 0
+  worse_on_both_patience: 1
+  required_usable_dev_steps: [500]
+  skip_validation: true
+  config_overrides:
+    model:
+      patch_budget: 96
+      use_offset_refinement: true
+      use_descriptor_bias: false
+      descriptor_bias_mode: none
+      descriptor_bias_scale: 1.0
+      gmap_bias_scale: 1.0
+      quality_floor: 0.05
+      static_score_weight: 0.35
+      dino_layers: [3, 6, 11]
+      candidate_pool: 224
+      native_fraction: 0.90
+      dino_fraction: 0.10
+      hybrid_grid_rows: 6
+      hybrid_grid_cols: 8
+      max_dino_per_cell: 1
+      dedupe_radius_px: 8.0
+      enable_gradient_branch: false
+      track_survival_horizon: 3
+      micro_patch_count: 1
+      micro_patch_pattern: grid
+      micro_patch_spread_px: 4.0
+      micro_patch_center_mode: refined
+      anchor_budget: 0
+      anchor_max_age: 0
+      anchor_match_cosine: 0.75
+      anchor_match_radius_px: 24.0
+      anchor_refresh_fraction: 0.25
+      multiscale_region_rows: 0
+      multiscale_region_cols: 0
+      multiscale_points_per_region: 0
+      multiscale_coarse_layers: [11]
+      multiscale_fine_layers: [3, 6]
+      quality_mode: none
+      quality_edge_power: 1.0
+      quality_insert_threshold: 0.0
+      quality_ba_threshold: 0.0
+      quality_smoothing: 0.0
+    training:
+      batch_size: 4
+      weight_decay: 0.000001
+      grad_clip: 5.0
+      eval_every: 500
+      train_steps: 6000
+      legacy_repro: true
+      learning_rate: 0.000003
+    losses:
+      selector_bce: 1.0
+      staticness_bce: 0.50
+      offset_l1: 0.25
+      descriptor_reg: 0.01
+      coverage_kl: 0.02
+      coverage_uniform_mix: 0.10
+      proposal_repulsion: 0.0
+    eval:
+      coverage_gate: 0.95
+      secondary_coverage_gate: 0.95
+      selection_metric: associated_ate
+      selection_mode: best_of_pure_hybrid
+      collect_dev_diagnostics: false
+      write_patch_diagnostics: false
+      write_dev_plots: false
+      save_best_pure100: true
+      save_best_hybrid: true
+      run_hybrid_dev_eval: true
+      frontend_mode: dino_hybrid
+      hybrid_frontend_mode: dino_hybrid
+      stride: 4
+      backend_thresh: 32.0
+      dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+      seed_runtime: false
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+      hybrid_eval_sequences:
+        - freiburg1_360
+        - freiburg1_room
+        - freiburg1_teddy
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+        - freiburg3_sitting_halfsphere
+        - freiburg3_sitting_rpy
+        - freiburg3_structure_texture_far
+        - freiburg3_structure_texture_near
+        - freiburg3_teddy
+      secondary_eval_sequences:
+        - freiburg2_360_hemisphere
+        - freiburg2_360_kidnap
+        - freiburg2_coke
+        - freiburg2_flowerbouquet_brownbackground
+        - freiburg2_metallic_sphere2
+        - freiburg2_pioneer_360
+        - freiburg2_pioneer_slam
+        - freiburg2_pioneer_slam2
+      pure100_frontend_mode: dino_proposals
+      pure100_model_overrides:
+        native_fraction: 0.0
+        dino_fraction: 1.0
+        enforce_unique_semantic: true
+        semantic_backfill_source: dino
+        semantic_grid_rows: 6
+        semantic_grid_cols: 8
+        max_semantic_per_cell: 2
+        semantic_dedupe_schedule_px: [8.0, 6.0, 4.0, 2.0]
+      pure100_eval_overrides:
+        stride: 4
+        backend_thresh: 32.0
+        dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+        seed_runtime: false
+
+evaluation:
+  skip_validation: true
+  coverage_gate: 0.95
+  secondary_coverage_gate: 0.95
+  secondary_label: Freiburg2 pressure pack
+  top_dev_limit: 3
+  sequences:
+    - freiburg1_360
+    - freiburg1_room
+    - freiburg1_teddy
+    - freiburg2_360_hemisphere
+    - freiburg2_360_kidnap
+    - freiburg2_coke
+    - freiburg2_flowerbouquet_brownbackground
+    - freiburg2_metallic_sphere2
+    - freiburg2_pioneer_360
+    - freiburg2_pioneer_slam
+    - freiburg2_pioneer_slam2
+    - freiburg3_sitting_halfsphere
+    - freiburg3_sitting_rpy
+    - freiburg3_structure_texture_far
+    - freiburg3_structure_texture_near
+    - freiburg3_teddy
+  secondary_eval_sequences:
+    - freiburg2_360_hemisphere
+    - freiburg2_360_kidnap
+    - freiburg2_coke
+    - freiburg2_flowerbouquet_brownbackground
+    - freiburg2_metallic_sphere2
+    - freiburg2_pioneer_360
+    - freiburg2_pioneer_slam
+    - freiburg2_pioneer_slam2
+
+runs:
+  - run_id: micro4_grid_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        micro_patch_count: 4
+        micro_patch_pattern: grid
+        micro_patch_spread_px: 4.0
+        micro_patch_center_mode: refined
+
+  - run_id: micro6_cross_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        micro_patch_count: 6
+        micro_patch_pattern: cross
+        micro_patch_spread_px: 5.0
+        micro_patch_center_mode: coarse
+
+  - run_id: matchbias_imap_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        descriptor_bias_mode: imap
+        descriptor_bias_scale: 1.0
+
+  - run_id: matchbias_dual_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        descriptor_bias_mode: imap_gmap
+        descriptor_bias_scale: 1.0
+        gmap_bias_scale: 0.5
+
+  - run_id: anchors_short_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        anchor_budget: 48
+        anchor_max_age: 2
+        anchor_match_cosine: 0.78
+        anchor_match_radius_px: 24.0
+        anchor_refresh_fraction: 0.35
+
+  - run_id: anchors_long_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        anchor_budget: 64
+        anchor_max_age: 5
+        anchor_match_cosine: 0.72
+        anchor_match_radius_px: 28.0
+        anchor_refresh_fraction: 0.20
+
+  - run_id: multiscale_32x4_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        multiscale_region_rows: 4
+        multiscale_region_cols: 8
+        multiscale_points_per_region: 4
+        multiscale_coarse_layers: [11]
+        multiscale_fine_layers: [3, 6]
+
+  - run_id: multiscale_24x5_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        multiscale_region_rows: 4
+        multiscale_region_cols: 6
+        multiscale_points_per_region: 5
+        multiscale_coarse_layers: [11]
+        multiscale_fine_layers: [3, 6]
+
+  - run_id: quality_soft_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        quality_mode: soft
+        quality_edge_power: 1.50
+        quality_insert_threshold: 0.08
+        quality_smoothing: 0.10
+
+  - run_id: quality_hard_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_focus071_lr_only_sweep_v1/train/focus071lr_orig_const3e6_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: best_of_pure_hybrid
+    config_overrides:
+      model:
+        quality_mode: hard_gate
+        quality_edge_power: 1.75
+        quality_insert_threshold: 0.12
+        quality_ba_threshold: 0.18
+        quality_smoothing: 0.10

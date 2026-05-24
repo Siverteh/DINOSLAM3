@@ -1,0 +1,82 @@
+name: dino_dpvo_freiburg1_paper_runtime_sweep_v1
+wait:
+  runner_pid_file: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_exploit_sweep_v4/runner.pid
+  process_patterns:
+    - refocus_vo.sweeps.run_assoc9_sweep --manifest /home/coder/DINOSLAM3/refocus_vo/configs/dino_dpvo_freiburg1_paper_exploit_sweep_v4.yaml
+    - /home/coder/DINOSLAM3/refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_exploit_sweep_v4
+pack:
+  script: refocus_vo/scripts/run_dino_dpvo_freiburg1_paper_fixed96_pack.sh
+  lowtex_script: refocus_vo/scripts/run_dino_dpvo_tum_low_texture_fixed96_pack.sh
+  sequences:
+    - freiburg1_360
+    - freiburg1_desk
+    - freiburg1_desk2
+    - freiburg1_floor
+    - freiburg1_plant
+    - freiburg1_room
+    - freiburg1_rpy
+    - freiburg1_teddy
+    - freiburg1_xyz
+  coverage_gate: 0.95
+  lowtex_baseline_csv: THESIS_RESULT_PURE100_SEMANTIC_BEST/refocus_vo/runs/eval/dino_dpvo_semantic_100_0_lowtex_fixed96_final_v1/metrics_summary.csv
+paper_metrics:
+  dpvo_default:
+    freiburg1_360: 0.135
+    freiburg1_desk: 0.038
+    freiburg1_desk2: 0.048
+    freiburg1_floor: 0.040
+    freiburg1_plant: 0.036
+    freiburg1_room: 0.394
+    freiburg1_rpy: 0.034
+    freiburg1_teddy: 0.064
+    freiburg1_xyz: 0.012
+  dpvo_fast:
+    freiburg1_360: 0.169
+    freiburg1_desk: 0.029
+    freiburg1_desk2: 0.064
+    freiburg1_floor: 0.047
+    freiburg1_plant: 0.047
+    freiburg1_room: 0.396
+    freiburg1_rpy: 0.034
+    freiburg1_teddy: 0.074
+    freiburg1_xyz: 0.012
+  droid_vo:
+    freiburg1_360: 0.161
+    freiburg1_desk: 0.028
+    freiburg1_desk2: 0.099
+    freiburg1_floor: 0.033
+    freiburg1_plant: 0.028
+    freiburg1_room: 0.327
+    freiburg1_rpy: 0.028
+    freiburg1_teddy: 0.169
+    freiburg1_xyz: 0.013
+checkpoints:
+  - checkpoint_family: broad_canonical_winner
+    checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    frontend_config: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/pack_eval_configs/broad_canonical_best_pure100_v1.yaml
+    imported_baseline_dpvo_style_csv: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/eval/broad_canonical_best_pure100_v1_pack/dpvo_style_metrics_summary.csv
+  - checkpoint_family: best_new_trained_run
+    checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    frontend_config: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/pack_eval_configs/paperv2_three_layer_no_gradient_90_10_v1.yaml
+    imported_baseline_dpvo_style_csv: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/eval/paperv2_three_layer_no_gradient_90_10_v1_pack/dpvo_style_metrics_summary.csv
+profiles:
+  - runtime_profile: fixed96_baseline
+    imported: true
+    dpvo_stride: 4
+    dpvo_backend_thresh: 32.0
+    dpvo_opts: BUFFER_SIZE=384 PATCHES_PER_FRAME=96 REMOVAL_WINDOW=22 OPTIMIZATION_WINDOW=10 PATCH_LIFETIME=13
+  - runtime_profile: dense128_balanced
+    imported: false
+    dpvo_stride: 4
+    dpvo_backend_thresh: 32.0
+    dpvo_opts: BUFFER_SIZE=512 PATCHES_PER_FRAME=128 REMOVAL_WINDOW=24 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  - runtime_profile: dense160_lowthresh
+    imported: false
+    dpvo_stride: 4
+    dpvo_backend_thresh: 28.0
+    dpvo_opts: BUFFER_SIZE=640 PATCHES_PER_FRAME=160 REMOVAL_WINDOW=26 OPTIMIZATION_WINDOW=12 PATCH_LIFETIME=15
+  - runtime_profile: dense160_stride3_longlife
+    imported: false
+    dpvo_stride: 3
+    dpvo_backend_thresh: 28.0
+    dpvo_opts: BUFFER_SIZE=640 PATCHES_PER_FRAME=160 REMOVAL_WINDOW=28 OPTIMIZATION_WINDOW=14 PATCH_LIFETIME=17

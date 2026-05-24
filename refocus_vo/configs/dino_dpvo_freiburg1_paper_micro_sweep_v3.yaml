@@ -1,0 +1,124 @@
+name: dino_dpvo_freiburg1_paper_micro_sweep_v3
+
+runner:
+  train_script: refocus_vo/scripts/train_dino_dpvo_frontend.sh
+  pack_script: refocus_vo/scripts/run_dino_dpvo_freiburg1_paper_fixed96_pack.sh
+  dataset_root: refocus_vo/data/tartanair_v2_raw
+  eval_dataset_root: refocus_vo/data/tartanair_v2_converted
+  tum_dataset_root: src/dino_slam3/data/tum_rgbd
+  dpvo_config_path: refocus_vo/external/repos/DPVO/config/default.yaml
+  train_device: cuda
+
+sweep:
+  no_improve_patience_steps: 2000
+  required_usable_dev_steps: [500, 1000]
+  config_overrides:
+    training:
+      train_steps: 12000
+      eval_every: 500
+    eval:
+      primary_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+      pure100_eval_sequences:
+        - freiburg1_360
+        - freiburg1_desk
+        - freiburg1_desk2
+        - freiburg1_floor
+        - freiburg1_plant
+        - freiburg1_room
+        - freiburg1_rpy
+        - freiburg1_teddy
+        - freiburg1_xyz
+
+evaluation:
+  coverage_gate: 0.95
+  baseline_assoc: 0.087841
+  baseline_ate: 0.220425
+  sequences:
+    - freiburg1_360
+    - freiburg1_desk
+    - freiburg1_desk2
+    - freiburg1_floor
+    - freiburg1_plant
+    - freiburg1_room
+    - freiburg1_rpy
+    - freiburg1_teddy
+    - freiburg1_xyz
+  current_champion:
+    run_id: broad_canonical_best_pure100_v1
+    checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    config: refocus_vo/configs/dino_dpvo_proposals_100_0_fullcover_fixed96_v1.yaml
+  baseline_candidates:
+    - run_id: freiburg1_paper_best_v1
+      checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v1_15k/train/assoc9_no_gradient_90_10_v1/best_pure100.pt
+      config: refocus_vo/configs/dino_dpvo_assoc9_no_gradient_90_10_pure_eval_v1.yaml
+      kind: current_paper_best
+
+runs:
+  - run_id: paperpush_geom_three_layer_95_5_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {1500: 0.092, 3000: 0.0885, 5000: 0.0855}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+        native_fraction: 0.95
+        dino_fraction: 0.05
+        candidate_pool: 192
+      training:
+        learning_rate: 0.000015
+        train_steps: 12000
+      losses:
+        staticness_bce: 0.45
+        offset_l1: 0.20
+
+  - run_id: paperpush_balanced_three_layer_90_10_smallpool_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/train/dino_dpvo_final_frontend_raw_v1/best.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {1500: 0.092, 3000: 0.0885, 5000: 0.0855}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        candidate_pool: 192
+      training:
+        learning_rate: 0.000015
+        train_steps: 12000
+      losses:
+        staticness_bce: 0.50
+        offset_l1: 0.25
+
+  - run_id: paperpush_continue_from_three_layer_best_v1
+    config: refocus_vo/configs/dino_dpvo_assoc9_three_layer_90_10_v1.yaml
+    subset_config: refocus_vo/configs/tartanair_subset_raw_8env_x4_v1.yaml
+    init_checkpoint: refocus_vo/runs/sweeps/dino_dpvo_freiburg1_paper_sweep_v2_wild15k/train/paperv2_three_layer_no_gradient_90_10_v1/best_pure100.pt
+    init_mode: partial
+    expected_eval_mode: pure100
+    stop_thresholds: {1500: 0.092, 3000: 0.0885, 5000: 0.0855}
+    config_overrides:
+      model:
+        enable_gradient_branch: false
+        native_fraction: 0.90
+        dino_fraction: 0.10
+        candidate_pool: 192
+      training:
+        learning_rate: 0.000008
+        train_steps: 8000
+      losses:
+        staticness_bce: 0.50
+        offset_l1: 0.25

@@ -1,0 +1,61 @@
+method_id: dino_patchgraph_stage3_graph_v1
+feature_type: DINO_PATCHGRAPH_STAGE3_GRAPH_V1
+
+model:
+  image_size: [240, 320]
+  patch_size: 16
+  num_patches: 64
+  max_nodes_per_object_ratio: 0.20
+  k_mutual_neighbors: 4
+  dino_layers: [6, 11]
+  dino_name_or_path: facebook/dinov3-vits16-pretrain-lvd1689m
+  dino_dtype: bf16
+  dino_hidden_dim: 192
+  local_patch_dim: 64
+  edge_dim: 192
+  graph_hidden_dim: 256
+  max_history: 3
+  lag_embedding_dim: 16
+  enable_offset_refinement: true
+  use_multiframe_graph: true
+  min_match_cosine: 0.40
+  ransac_threshold_px: 2.0
+  min_matches_for_pose: 8
+
+teacher:
+  boundary: 0.45
+  consistency: 0.30
+  depth_safe: 0.10
+  reprojection: 0.15
+  keep_ratio: 0.30
+
+training:
+  batch_size: 4
+  num_workers: 4
+  train_steps_stage1: 10000
+  train_steps_stage2: 90000
+  learning_rate: 0.0002
+  weight_decay: 0.000001
+  grad_clip: 5.0
+  log_every: 50
+  eval_every: 1000
+  device: cuda
+
+losses:
+  selector_bce: 1.0
+  persistence_l1: 0.25
+  edge_valid_bce: 0.5
+  confidence_bce: 0.5
+  offset_l1: 0.5
+  rotation_l1: 2.0
+  translation_dir_l1: 1.0
+  translation_scale_l1: 0.5
+  coverage_reg: 0.1
+  semantic_consistency: 0.1
+
+eval:
+  max_dt: 0.02
+  missing_penalty_m: 3.0
+  min_coverage_ok: 0.95
+  track_confidence_threshold: 0.35
+  use_geometric_pose: false

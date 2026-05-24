@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+.env
+
+# Large or generated experiment artifacts.
+runs/
+results/
+figures/
+images/
+outputs/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.npy
+*.npz
+*.csv
+*.jsonl
+*.log
+*.db
+*.sqlite
+
+# Datasets and external checkouts should be fetched separately.
+data/
+refocus_vo/data/
+refocus_vo/external/repos/
+
+# Archives and rendered documents.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
