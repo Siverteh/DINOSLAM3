@@ -1,0 +1,24 @@
+source_api: auto
+camera_name: lcam_left
+modalities:
+  - image
+  - depth
+subset:
+  environments:
+    - abandonedfactory
+    - abandonedfactory_night
+    - carwelding
+    - hospital
+    - office
+    - office2
+    - japanesealley
+    - neighborhood
+  difficulties:
+    - Easy
+    - Hard
+  max_trajectories_per_env_difficulty: 1
+  total_target_trajectories: 16
+windowing:
+  n_frames: 4
+  train_windows: 80000
+  dev_windows: 8000

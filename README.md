@@ -4,6 +4,8 @@ This folder contains the code-only release bundle for the thesis implementation.
 
 No generated result files, plots, datasets, model checkpoints, trajectory dumps, logs, or external repository checkouts are included here.
 
+Repository URL: <https://github.com/Siverteh/DINOSLAM3>
+
 ## What Is Included
 
 - `refocus_vo/src/refocus_vo/dino_dpvo/`: the DINO-DPVO frontend, DPVO adapter, tracker wrapper, diagnostics, and configuration dataclasses.

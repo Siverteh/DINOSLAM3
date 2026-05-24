@@ -28,7 +28,7 @@ checkpoints/
 *.sqlite
 
 # Datasets and external checkouts should be fetched separately.
-data/
+/data/
 refocus_vo/data/
 refocus_vo/external/repos/
 
@@ -43,3 +43,6 @@ refocus_vo/external/repos/
 *.jpeg
 *.gif
 *.mp4
+
+# Local thesis source restored from Overleaf; kept out of the code-release repo.
+master_thesis/
